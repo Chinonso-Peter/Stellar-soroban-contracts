@@ -27,6 +27,7 @@ ink_env = { version = "5.0.0", default-features = false }
 propchain-contracts = { path = "../contracts/lib", default-features = false }
 property-token = { path = "../contracts/property-token", default-features = false }
 propchain-insurance = { path = "../contracts/insurance", default-features = false }
+propchain-traits = { path = "../contracts/traits", default-features = false }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"], optional = true }
@@ -46,7 +47,9 @@ ink_e2e = "5.0.0"
 tokio = { version = "1.0", features = ["full"] }
 propchain-contracts = { path = "../contracts/lib", default-features = false }
 property-token = { path = "../contracts/property-token", default-features = false }
+propchain-insurance = { path = "../contracts/insurance", default-features = false }
 proptest = { version = "1.4", default-features = false }
+propchain-traits = { path = "../contracts/traits", default-features = false }
 
 [features]
 default = ["std"]
@@ -57,6 +60,7 @@ std = [
     "propchain-contracts/std",
     "property-token/std",
     "propchain-insurance/std",
+    "propchain-traits/std",
     "serde/std",
     "serde_json/std",
     "tokio",
