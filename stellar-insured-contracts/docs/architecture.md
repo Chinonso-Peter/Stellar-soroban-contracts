@@ -322,30 +322,52 @@ pub fn get_property_summary(&self, id: PropertyId) -> PropertySummary {
 
 ## Upgrade Architecture
 
-### Proxy Pattern
+### Proxy Pattern With Timelocked Admin Control
 
 ```rust
 #[ink(storage)]
 pub struct ProxyContract {
-    implementation: AccountId,
+    implementation: Hash,
     admin: AccountId,
+    pending_admin: Option<AccountId>,
+    admin_transfer_requested_at: Option<u64>,
+    renounce_requested_at: Option<u64>,
 }
 
 impl ProxyContract {
     #[ink(message)]
-    pub fn upgrade(&mut self, new_implementation: AccountId) -> Result<(), Error> {
-        if self.env().caller() != self.admin {
-            return Err(Error::Unauthorized);
-        }
-        self.implementation = new_implementation;
-        self.env().emit_event(Upgraded {
-            old: self.implementation,
-            new: new_implementation,
-        });
-        Ok(())
+    pub fn upgrade_to(&mut self, new_implementation: Hash) -> Result<(), Error> { /* admin only */ }
+
+    #[ink(message)]
+    pub fn set_admin(&mut self, new_admin: AccountId) -> Result<(), Error> {
+        // Starts a timelocked handoff.
+    }
+
+    #[ink(message)]
+    pub fn accept_admin(&mut self) -> Result<(), Error> {
+        // Pending admin accepts after timelock expiry.
+    }
+
+    #[ink(message)]
+    pub fn renounce_admin(&mut self) -> Result<(), Error> {
+        // First call schedules renounce, second call executes after delay.
     }
 }
 ```
+
+Recommended control flow:
+
+1. Current admin calls `set_admin(new_admin)`.
+2. The contract records the pending admin and a future acceptance timestamp.
+3. The pending admin calls `accept_admin()` only after the timelock has fully elapsed.
+4. Upgrades remain callable only by the active admin.
+5. `renounce_admin()` uses the same delayed pattern so loss of control is visible on-chain before it becomes final.
+
+Operational guidance:
+
+- Use a fixed on-chain delay of at least `3 days` for admin handoff and renounce flows in development and staging.
+- Use a fixed on-chain delay of at least `7 days` for production governance-controlled deployments.
+- Record the proposal id, requested timestamp, ETA, and final execution timestamp for every admin or upgrade transition.
 
 ### Migration Strategy
 
