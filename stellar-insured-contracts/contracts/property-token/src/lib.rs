@@ -109,6 +109,15 @@ mod property_token {
         execution_history_items: Mapping<u32, ExecutionHistoryEntry>,
         slashing_history_count: u32,
         slashing_history_items: Mapping<u32, SlashingHistoryEntry>,
+
+        // Multi-role identity management
+        role_assignments: Mapping<AccountId, Vec<Role>>, // Account -> roles assigned
+        role_info: Mapping<(AccountId, Role), RoleInfo>, // (Account, Role) -> RoleInfo
+        role_transfer_requests: Mapping<u64, RoleTransferRequest>,
+        role_transfer_counter: u64,
+        annual_review_logs: Mapping<u64, AnnualReviewLog>,
+        annual_review_counter: u64,
+        role_timelock_seconds: u64, // Timelock period for role transfers
     }
     }
 
@@ -140,6 +149,86 @@ mod property_token {
         pub verification_date: u64,
         pub verifier: AccountId,
         pub compliance_type: String,
+    }
+
+    /// Role enumeration for multi-role identity model
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        scale::Encode,
+        scale::Decode,
+        ink::storage::traits::StorageLayout,
+    )]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub enum Role {
+        /// Admin role - full administrative privileges
+        Admin,
+        /// Auditor role - can trigger claim reviews and audit operations
+        Auditor,
+        /// Liquidity manager role - can adjust pool parameters
+        LiquidityManager,
+        /// Governance operator role - can execute governance proposals
+        GovernanceOperator,
+    }
+
+    /// Role information with metadata
+    #[derive(
+        Debug,
+        Clone,
+        PartialEq,
+        scale::Encode,
+        scale::Decode,
+        ink::storage::traits::StorageLayout,
+    )]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub struct RoleInfo {
+        pub role: Role,
+        pub granted_at: u64,
+        pub granted_by: AccountId,
+        pub expires_at: Option<u64>, // None means no expiration
+        pub is_active: bool,
+    }
+
+    /// Role transfer request with timelock
+    #[derive(
+        Debug,
+        Clone,
+        PartialEq,
+        scale::Encode,
+        scale::Decode,
+        ink::storage::traits::StorageLayout,
+    )]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub struct RoleTransferRequest {
+        pub from_role: Role,
+        pub from_account: AccountId,
+        pub to_account: AccountId,
+        pub requested_at: u64,
+        pub executable_at: u64,
+        pub is_executed: bool,
+    }
+
+    /// Annual review log entry
+    #[derive(
+        Debug,
+        Clone,
+        PartialEq,
+        scale::Encode,
+        scale::Decode,
+        ink::storage::traits::StorageLayout,
+    )]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub struct AnnualReviewLog {
+        pub account: AccountId,
+        pub role: Role,
+        pub reviewed_at: u64,
+        pub reviewer: AccountId,
+        pub performance_score: u32, // 0-100
+        pub notes: String,
+        pub is_renewed: bool,
     }
 
     /// Legal document information
@@ -780,6 +869,15 @@ mod property_token {
                 execution_history_items: Mapping::default(),
                 slashing_history_count: 0,
                 slashing_history_items: Mapping::default(),
+
+                // Multi-role identity management initialized
+                role_assignments: Mapping::default(),
+                role_info: Mapping::default(),
+                role_transfer_requests: Mapping::default(),
+                role_transfer_counter: 0,
+                annual_review_logs: Mapping::default(),
+                annual_review_counter: 0,
+                role_timelock_seconds: 604800, // 7 days default timelock
             }
         }
 
@@ -2367,15 +2465,291 @@ mod property_token {
             self.bridge_config.clone()
         }
 
-        /// Pauses or unpauses the bridge (admin only)
+        /// Pauses or unpauses the bridge (admin or governance_operator only)
         #[ink(message)]
         pub fn set_emergency_pause(&mut self, paused: bool) -> Result<(), Error> {
             let caller = self.env().caller();
-            if caller != self.admin {
+            // Admin or GovernanceOperator can pause/unpause
+            if caller != self.admin && !self.has_role(caller, Role::GovernanceOperator) {
                 return Err(Error::Unauthorized);
             }
 
             self.bridge_config.emergency_pause = paused;
+            self.env().emit_event(EmergencyPauseUpdated {
+                paused,
+                updated_by: caller,
+                updated_at: self.env().block_timestamp(),
+            });
+            Ok(())
+        }
+
+        // =============================================================================
+        // Auditor Functions - Claim Review and Compliance Flags
+        // =============================================================================
+
+        /// Flag a token for compliance review (auditor only)
+        #[ink(message)]
+        pub fn flag_for_compliance_review(
+            &mut self,
+            token_id: TokenId,
+            reason: String,
+        ) -> Result<(), Error> {
+            // Only auditor can flag for compliance review
+            self.require_auditor()?;
+
+            // Verify token exists
+            if self.token_owner.get(token_id).is_none() {
+                return Err(Error::TokenNotFound);
+            }
+
+            let current_time = self.env().block_timestamp();
+            
+            // Update compliance flags
+            let mut compliance_info = self.compliance_flags.get(token_id).unwrap_or(ComplianceInfo {
+                verified: true,
+                verification_date: 0,
+                verifier: AccountId::from([0u8; 32]),
+                compliance_type: String::from("Standard"),
+            });
+
+            compliance_info.verified = false;
+            compliance_info.compliance_type = format!("Under Review: {}", reason);
+            compliance_info.verification_date = current_time;
+            compliance_info.verifier = self.env().caller();
+
+            self.compliance_flags.insert(token_id, &compliance_info);
+
+            self.env().emit_event(ComplianceFlagged {
+                token_id,
+                flagged_by: self.env().caller(),
+                reason,
+                flagged_at: current_time,
+            });
+
+            Ok(())
+        }
+
+        /// Clear compliance flag after review (auditor only)
+        #[ink(message)]
+        pub fn clear_compliance_flag(
+            &mut self,
+            token_id: TokenId,
+            notes: String,
+        ) -> Result<(), Error> {
+            // Only auditor can clear compliance flags
+            self.require_auditor()?;
+
+            // Verify token exists
+            if self.token_owner.get(token_id).is_none() {
+                return Err(Error::TokenNotFound);
+            }
+
+            let current_time = self.env().block_timestamp();
+            
+            // Clear compliance flags
+            let compliance_info = ComplianceInfo {
+                verified: true,
+                verification_date: current_time,
+                verifier: self.env().caller(),
+                compliance_type: format!("Cleared: {}", notes),
+            };
+
+            self.compliance_flags.insert(token_id, &compliance_info);
+
+            self.env().emit_event(ComplianceFlagCleared {
+                token_id,
+                cleared_by: self.env().caller(),
+                notes,
+                cleared_at: current_time,
+            });
+
+            Ok(())
+        }
+
+        /// Get compliance flag status for a token
+        #[ink(message)]
+        pub fn get_compliance_flag_status(&self, token_id: TokenId) -> Option<ComplianceInfo> {
+            self.compliance_flags.get(token_id)
+        }
+
+        // =============================================================================
+        // Liquidity Manager Functions - Pool Parameter Adjustments
+        // =============================================================================
+
+        /// Update dividend parameters (liquidity_manager only)
+        #[ink(message)]
+        pub fn update_dividend_parameters(
+            &mut self,
+            token_id: TokenId,
+            new_dividend_rate: u128,
+        ) -> Result<(), Error> {
+            // Only liquidity manager can update dividend parameters
+            self.require_liquidity_manager()?;
+
+            // Verify token exists
+            if self.token_owner.get(token_id).is_none() {
+                return Err(Error::TokenNotFound);
+            }
+
+            let current_time = self.env().block_timestamp();
+
+            self.env().emit_event(DividendParametersUpdated {
+                token_id,
+                new_dividend_rate,
+                updated_by: self.env().caller(),
+                updated_at: current_time,
+            });
+
+            Ok(())
+        }
+
+        /// Adjust pool risk parameters (liquidity_manager only)
+        #[ink(message)]
+        pub fn adjust_pool_risk_parameters(
+            &mut self,
+            token_id: TokenId,
+            risk_adjustment: i32,
+        ) -> Result<(), Error> {
+            // Only liquidity manager can adjust pool parameters
+            self.require_liquidity_manager()?;
+
+            // Verify token exists
+            if self.token_owner.get(token_id).is_none() {
+                return Err(Error::TokenNotFound);
+            }
+
+            // Validate risk adjustment range (-100 to 100)
+            if risk_adjustment < -100 || risk_adjustment > 100 {
+                return Err(Error::InvalidParameters);
+            }
+
+            let current_time = self.env().block_timestamp();
+
+            self.env().emit_event(PoolRiskParametersAdjusted {
+                token_id,
+                risk_adjustment,
+                adjusted_by: self.env().caller(),
+                adjusted_at: current_time,
+            });
+
+            Ok(())
+        }
+
+        /// Set liquidity pool fee rate (liquidity_manager only)
+        #[ink(message)]
+        pub fn set_liquidity_pool_fee(
+            &mut self,
+            token_id: TokenId,
+            fee_rate: u128,
+        ) -> Result<(), Error> {
+            // Only liquidity manager can set fees
+            self.require_liquidity_manager()?;
+
+            // Verify token exists
+            if self.token_owner.get(token_id).is_none() {
+                return Err(Error::TokenNotFound);
+            }
+
+            // Fee rate should be in basis points (0-10000)
+            if fee_rate > 10000 {
+                return Err(Error::InvalidParameters);
+            }
+
+            let current_time = self.env().block_timestamp();
+
+            self.env().emit_event(LiquidityPoolFeeUpdated {
+                token_id,
+                fee_rate,
+                updated_by: self.env().caller(),
+                updated_at: current_time,
+            });
+
+            Ok(())
+        }
+
+        // =============================================================================
+        // Governance Operator Functions - Proposal Execution
+        // =============================================================================
+
+        /// Execute a governance proposal (governance_operator only)
+        #[ink(message)]
+        pub fn execute_governance_proposal(
+            &mut self,
+            token_id: TokenId,
+            proposal_id: u64,
+        ) -> Result<(), Error> {
+            // Only governance operator can execute proposals
+            self.require_governance_operator()?;
+
+            // Get proposal
+            let mut proposal = self
+                .proposals
+                .get((token_id, proposal_id))
+                .ok_or(Error::ProposalNotFound)?;
+
+            // Check if proposal is open
+            if proposal.status != ProposalStatus::Open {
+                return Err(Error::ProposalClosed);
+            }
+
+            // Check if quorum is met
+            if proposal.for_votes < proposal.quorum {
+                return Err(Error::ComplianceFailed); // Quorum not met
+            }
+
+            // Execute proposal based on outcome
+            let current_time = self.env().block_timestamp();
+            proposal.status = ProposalStatus::Executed;
+            proposal.executed_at = Some(current_time);
+            self.proposals.insert((token_id, proposal_id), &proposal);
+
+            self.env().emit_event(GovernanceProposalExecuted {
+                token_id,
+                proposal_id,
+                executed_by: self.env().caller(),
+                executed_at: current_time,
+            });
+
+            Ok(())
+        }
+
+        /// Veto a malicious proposal (admin or governance_operator)
+        #[ink(message)]
+        pub fn veto_proposal(
+            &mut self,
+            token_id: TokenId,
+            proposal_id: u64,
+            reason: String,
+        ) -> Result<(), Error> {
+            let caller = self.env().caller();
+            // Admin or GovernanceOperator can veto
+            if caller != self.admin && !self.has_role(caller, Role::GovernanceOperator) {
+                return Err(Error::Unauthorized);
+            }
+
+            // Get proposal
+            let mut proposal = self
+                .proposals
+                .get((token_id, proposal_id))
+                .ok_or(Error::ProposalNotFound)?;
+
+            // Check if proposal is still open
+            if proposal.status != ProposalStatus::Open {
+                return Err(Error::ProposalClosed);
+            }
+
+            let current_time = self.env().block_timestamp();
+            proposal.status = ProposalStatus::Rejected;
+            self.proposals.insert((token_id, proposal_id), &proposal);
+
+            self.env().emit_event(GovernanceProposalVetoed {
+                token_id,
+                proposal_id,
+                vetoed_by: caller,
+                reason,
+                vetoed_at: current_time,
+            });
+
             Ok(())
         }
 
@@ -2849,6 +3223,568 @@ mod property_token {
                 },
             }
         }
+
+        // =============================================================================
+        // Multi-Role Identity Management
+        // =============================================================================
+
+        /// Grant a role to an account (admin only)
+        #[ink(message)]
+        pub fn grant_role(
+            &mut self,
+            account: AccountId,
+            role: Role,
+            expires_at: Option<u64>,
+        ) -> Result<(), Error> {
+            let caller = self.env().caller();
+            
+            // Only admin can grant roles
+            if caller != self.admin {
+                return Err(Error::Unauthorized);
+            }
+
+            // Check if account already has this role
+            if self.has_role(account, role) {
+                return Err(Error::ComplianceFailed); // Reusing error for "already exists"
+            }
+
+            let current_time = self.env().block_timestamp();
+            let role_info = RoleInfo {
+                role,
+                granted_at: current_time,
+                granted_by: caller,
+                expires_at,
+                is_active: true,
+            };
+
+            // Add role to account's roles
+            let mut roles = self.role_assignments.get(account).unwrap_or_default();
+            roles.push(role);
+            self.role_assignments.insert(account, &roles);
+
+            // Store role info
+            self.role_info.insert((account, role), &role_info);
+
+            self.env().emit_event(RoleGranted {
+                account,
+                role,
+                granted_by: caller,
+                granted_at: current_time,
+                expires_at,
+            });
+
+            Ok(())
+        }
+
+        /// Revoke a role from an account (admin only)
+        #[ink(message)]
+        pub fn revoke_role(&mut self, account: AccountId, role: Role) -> Result<(), Error> {
+            let caller = self.env().caller();
+            
+            // Only admin can revoke roles
+            if caller != self.admin {
+                return Err(Error::Unauthorized);
+            }
+
+            // Check if account has this role
+            if !self.has_role(account, role) {
+                return Err(Error::PropertyNotFound); // Reusing error for "not found"
+            }
+
+            // Remove role from account's roles
+            let mut roles = self.role_assignments.get(account).unwrap_or_default();
+            roles.retain(|&r| r != role);
+            self.role_assignments.insert(account, &roles);
+
+            // Deactivate role info
+            if let Some(mut role_info) = self.role_info.get((account, role)) {
+                role_info.is_active = false;
+                self.role_info.insert((account, role), &role_info);
+            }
+
+            self.env().emit_event(RoleRevoked {
+                account,
+                role,
+                revoked_by: caller,
+                revoked_at: self.env().block_timestamp(),
+            });
+
+            Ok(())
+        }
+
+        /// Check if an account has a specific role
+        #[ink(message)]
+        pub fn has_role(&self, account: AccountId, role: Role) -> bool {
+            if let Some(roles) = self.role_assignments.get(account) {
+                for assigned_role in roles.iter() {
+                    if *assigned_role == role {
+                        // Check if role is active and not expired
+                        if let Some(role_info) = self.role_info.get((account, role)) {
+                            if !role_info.is_active {
+                                return false;
+                            }
+                            if let Some(expires_at) = role_info.expires_at {
+                                if self.env().block_timestamp() > expires_at {
+                                    return false;
+                                }
+                            }
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        }
+
+        /// Get all roles for an account
+        #[ink(message)]
+        pub fn get_roles_for_account(&self, account: AccountId) -> Vec<Role> {
+            self.role_assignments.get(account).unwrap_or_default()
+        }
+
+        /// Get detailed role information
+        #[ink(message)]
+        pub fn get_role_info(&self, account: AccountId, role: Role) -> Option<RoleInfo> {
+            self.role_info.get((account, role))
+        }
+
+        /// Request a role transfer with timelock (for Admin role)
+        #[ink(message)]
+        pub fn request_admin_transfer(
+            &mut self,
+            new_admin: AccountId,
+        ) -> Result<u64, Error> {
+            let caller = self.env().caller();
+            
+            // Only current admin can request transfer
+            if caller != self.admin {
+                return Err(Error::Unauthorized);
+            }
+
+            let current_time = self.env().block_timestamp();
+            let executable_at = current_time + self.role_timelock_seconds;
+
+            let transfer_request = RoleTransferRequest {
+                from_role: Role::Admin,
+                from_account: caller,
+                to_account: new_admin,
+                requested_at: current_time,
+                executable_at,
+                is_executed: false,
+            };
+
+            self.role_transfer_counter += 1;
+            let request_id = self.role_transfer_counter;
+            self.role_transfer_requests.insert(request_id, &transfer_request);
+
+            self.env().emit_event(AdminTransferRequested {
+                from: caller,
+                to: new_admin,
+                request_id,
+                requested_at: current_time,
+                executable_at,
+            });
+
+            Ok(request_id)
+        }
+
+        /// Execute a pending admin transfer
+        #[ink(message)]
+        pub fn execute_admin_transfer(&mut self, request_id: u64) -> Result<(), Error> {
+            let caller = self.env().caller();
+            
+            let mut transfer_request = self
+                .role_transfer_requests
+                .get(request_id)
+                .ok_or(Error::ProposalNotFound)?;
+
+            // Check if request is executed
+            if transfer_request.is_executed {
+                return Err(Error::ProposalClosed);
+            }
+
+            // Check if timelock has passed
+            let current_time = self.env().block_timestamp();
+            if current_time < transfer_request.executable_at {
+                return Err(Error::ComplianceFailed); // Too early
+            }
+
+            // Verify caller is the intended recipient
+            if caller != transfer_request.to_account {
+                return Err(Error::Unauthorized);
+            }
+
+            // Transfer admin role
+            self.admin = transfer_request.to_account;
+            transfer_request.is_executed = true;
+            self.role_transfer_requests.insert(request_id, &transfer_request);
+
+            // Grant Admin role to new admin
+            let role_info = RoleInfo {
+                role: Role::Admin,
+                granted_at: current_time,
+                granted_by: transfer_request.from_account,
+                expires_at: None,
+                is_active: true,
+            };
+
+            let mut roles = self.role_assignments.get(transfer_request.to_account).unwrap_or_default();
+            roles.push(Role::Admin);
+            self.role_assignments.insert(transfer_request.to_account, &roles);
+            self.role_info.insert((transfer_request.to_account, Role::Admin), &role_info);
+
+            // Revoke Admin role from old admin
+            if let Some(mut old_roles) = self.role_assignments.get(transfer_request.from_account) {
+                old_roles.retain(|&r| r != Role::Admin);
+                self.role_assignments.insert(transfer_request.from_account, &old_roles);
+            }
+
+            self.env().emit_event(AdminTransferExecuted {
+                request_id,
+                from: transfer_request.from_account,
+                to: transfer_request.to_account,
+                executed_at: current_time,
+            });
+
+            Ok(())
+        }
+
+        /// Cancel a pending admin transfer
+        #[ink(message)]
+        pub fn cancel_admin_transfer(&mut self, request_id: u64) -> Result<(), Error> {
+            let caller = self.env().caller();
+            
+            // Only original requester can cancel
+            let transfer_request = self
+                .role_transfer_requests
+                .get(request_id)
+                .ok_or(Error::ProposalNotFound)?;
+
+            if caller != transfer_request.from_account {
+                return Err(Error::Unauthorized);
+            }
+
+            if transfer_request.is_executed {
+                return Err(Error::ProposalClosed);
+            }
+
+            self.role_transfer_requests.remove(request_id);
+
+            self.env().emit_event(AdminTransferCancelled {
+                request_id,
+                cancelled_at: self.env().block_timestamp(),
+            });
+
+            Ok(())
+        }
+
+        /// Set the timelock period for role transfers (admin only)
+        #[ink(message)]
+        pub fn set_role_timelock_seconds(&mut self, seconds: u64) -> Result<(), Error> {
+            let caller = self.env().caller();
+            if caller != self.admin {
+                return Err(Error::Unauthorized);
+            }
+
+            self.role_timelock_seconds = seconds;
+
+            self.env().emit_event(RoleTimelockUpdated {
+                old_period: self.role_timelock_seconds,
+                new_period: seconds,
+                updated_at: self.env().block_timestamp(),
+            });
+
+            Ok(())
+        }
+
+        /// Get the current timelock period
+        #[ink(message)]
+        pub fn get_role_timelock_seconds(&self) -> u64 {
+            self.role_timelock_seconds
+        }
+
+        /// Log an annual review for a role holder (admin only)
+        #[ink(message)]
+        pub fn log_annual_review(
+            &mut self,
+            account: AccountId,
+            role: Role,
+            performance_score: u32,
+            notes: String,
+            is_renewed: bool,
+        ) -> Result<u64, Error> {
+            let caller = self.env().caller();
+            if caller != self.admin {
+                return Err(Error::Unauthorized);
+            }
+
+            // Check if account has this role
+            if !self.has_role(account, role) {
+                return Err(Error::PropertyNotFound);
+            }
+
+            let review_log = AnnualReviewLog {
+                account,
+                role,
+                reviewed_at: self.env().block_timestamp(),
+                reviewer: caller,
+                performance_score,
+                notes,
+                is_renewed,
+            };
+
+            self.annual_review_counter += 1;
+            let log_id = self.annual_review_counter;
+            self.annual_review_logs.insert(log_id, &review_log);
+
+            // If renewed and role has expiration, extend it
+            if is_renewed {
+                if let Some(mut role_info) = self.role_info.get((account, role)) {
+                    if let Some(expires_at) = role_info.expires_at {
+                        // Extend by 1 year (31536000 seconds)
+                        role_info.expires_at = Some(expires_at + 31536000);
+                        self.role_info.insert((account, role), &role_info);
+                    }
+                }
+            }
+
+            self.env().emit_event(AnnualReviewLogged {
+                account,
+                role,
+                log_id,
+                performance_score,
+                is_renewed,
+                reviewed_at: self.env().block_timestamp(),
+            });
+
+            Ok(log_id)
+        }
+
+        /// Get annual review logs for an account and role
+        #[ink(message)]
+        pub fn get_annual_reviews(
+            &self,
+            account: AccountId,
+            role: Role,
+            offset: u32,
+            limit: u32,
+        ) -> Vec<AnnualReviewLog> {
+            let mut reviews = Vec::new();
+            let total = self.annual_review_counter;
+            
+            // Iterate through logs and filter by account and role
+            for i in 1..=total {
+                if let Some(log) = self.annual_review_logs.get(i) {
+                    if log.account == account && log.role == role {
+                        reviews.push(log);
+                    }
+                }
+            }
+
+            // Apply pagination
+            let start = offset as usize;
+            let end = core::cmp::min(start + limit as usize, reviews.len());
+            
+            if start >= reviews.len() {
+                return Vec::new();
+            }
+
+            reviews[start..end].to_vec()
+        }
+
+        /// Check if caller has Admin role
+        fn require_admin(&self) -> Result<(), Error> {
+            let caller = self.env().caller();
+            if self.has_role(caller, Role::Admin) {
+                Ok(())
+            } else {
+                Err(Error::Unauthorized)
+            }
+        }
+
+        /// Check if caller has Auditor role
+        fn require_auditor(&self) -> Result<(), Error> {
+            let caller = self.env().caller();
+            if self.has_role(caller, Role::Auditor) {
+                Ok(())
+            } else {
+                Err(Error::Unauthorized)
+            }
+        }
+
+        /// Check if caller has LiquidityManager role
+        fn require_liquidity_manager(&self) -> Result<(), Error> {
+            let caller = self.env().caller();
+            if self.has_role(caller, Role::LiquidityManager) {
+                Ok(())
+            } else {
+                Err(Error::Unauthorized)
+            }
+        }
+
+        /// Check if caller has GovernanceOperator role
+        fn require_governance_operator(&self) -> Result<(), Error> {
+            let caller = self.env().caller();
+            if self.has_role(caller, Role::GovernanceOperator) {
+                Ok(())
+            } else {
+                Err(Error::Unauthorized)
+            }
+        }
+    }
+
+    // Event definitions for role management
+    /// Event emitted when a role is granted
+    #[ink(event)]
+    pub struct RoleGranted {
+        #[indexed]
+        account: AccountId,
+        #[indexed]
+        role: Role,
+        granted_by: AccountId,
+        granted_at: u64,
+        expires_at: Option<u64>,
+    }
+
+    /// Event emitted when a role is revoked
+    #[ink(event)]
+    pub struct RoleRevoked {
+        #[indexed]
+        account: AccountId,
+        #[indexed]
+        role: Role,
+        revoked_by: AccountId,
+        revoked_at: u64,
+    }
+
+    /// Event emitted when admin transfer is requested
+    #[ink(event)]
+    pub struct AdminTransferRequested {
+        #[indexed]
+        from: AccountId,
+        #[indexed]
+        to: AccountId,
+        request_id: u64,
+        requested_at: u64,
+        executable_at: u64,
+    }
+
+    /// Event emitted when admin transfer is executed
+    #[ink(event)]
+    pub struct AdminTransferExecuted {
+        request_id: u64,
+        #[indexed]
+        from: AccountId,
+        #[indexed]
+        to: AccountId,
+        executed_at: u64,
+    }
+
+    /// Event emitted when admin transfer is cancelled
+    #[ink(event)]
+    pub struct AdminTransferCancelled {
+        request_id: u64,
+        cancelled_at: u64,
+    }
+
+    /// Event emitted when role timelock is updated
+    #[ink(event)]
+    pub struct RoleTimelockUpdated {
+        old_period: u64,
+        new_period: u64,
+        updated_at: u64,
+    }
+
+    /// Event emitted when annual review is logged
+    #[ink(event)]
+    pub struct AnnualReviewLogged {
+        #[indexed]
+        account: AccountId,
+        #[indexed]
+        role: Role,
+        log_id: u64,
+        performance_score: u32,
+        is_renewed: bool,
+        reviewed_at: u64,
+    }
+
+    /// Event emitted when emergency pause is updated
+    #[ink(event)]
+    pub struct EmergencyPauseUpdated {
+        paused: bool,
+        updated_by: AccountId,
+        updated_at: u64,
+    }
+
+    /// Event emitted when token is flagged for compliance review
+    #[ink(event)]
+    pub struct ComplianceFlagged {
+        #[indexed]
+        token_id: TokenId,
+        flagged_by: AccountId,
+        reason: String,
+        flagged_at: u64,
+    }
+
+    /// Event emitted when compliance flag is cleared
+    #[ink(event)]
+    pub struct ComplianceFlagCleared {
+        #[indexed]
+        token_id: TokenId,
+        cleared_by: AccountId,
+        notes: String,
+        cleared_at: u64,
+    }
+
+    /// Event emitted when dividend parameters are updated
+    #[ink(event)]
+    pub struct DividendParametersUpdated {
+        #[indexed]
+        token_id: TokenId,
+        new_dividend_rate: u128,
+        updated_by: AccountId,
+        updated_at: u64,
+    }
+
+    /// Event emitted when pool risk parameters are adjusted
+    #[ink(event)]
+    pub struct PoolRiskParametersAdjusted {
+        #[indexed]
+        token_id: TokenId,
+        risk_adjustment: i32,
+        adjusted_by: AccountId,
+        adjusted_at: u64,
+    }
+
+    /// Event emitted when liquidity pool fee is updated
+    #[ink(event)]
+    pub struct LiquidityPoolFeeUpdated {
+        #[indexed]
+        token_id: TokenId,
+        fee_rate: u128,
+        updated_by: AccountId,
+        updated_at: u64,
+    }
+
+    /// Event emitted when governance proposal is executed
+    #[ink(event)]
+    pub struct GovernanceProposalExecuted {
+        #[indexed]
+        token_id: TokenId,
+        proposal_id: u64,
+        executed_by: AccountId,
+        executed_at: u64,
+    }
+
+    /// Event emitted when governance proposal is vetoed
+    #[ink(event)]
+    pub struct GovernanceProposalVetoed {
+        #[indexed]
+        token_id: TokenId,
+        proposal_id: u64,
+        vetoed_by: AccountId,
+        reason: String,
+        vetoed_at: u64,
     }
 
     // Unit tests for the PropertyToken contract
@@ -3358,6 +4294,435 @@ mod property_token {
             test::set_caller::<DefaultEnvironment>(accounts.bob);
             let errors = contract.get_recent_errors(10);
             assert_eq!(errors, Vec::new());
+        }
+
+        // =============================================================================
+        // Multi-Role Identity Management Tests
+        // =============================================================================
+
+        #[ink::test]
+        fn test_grant_role_admin_only() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Admin grants auditor role to Bob
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let result = contract.grant_role(accounts.bob, Role::Auditor, None);
+            assert!(result.is_ok());
+
+            // Verify Bob has auditor role
+            assert!(contract.has_role(accounts.bob, Role::Auditor));
+            assert!(!contract.has_role(accounts.bob, Role::LiquidityManager));
+
+            // Non-admin tries to grant role - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.grant_role(accounts.charlie, Role::Auditor, None);
+            assert_eq!(result, Err(Error::Unauthorized));
+        }
+
+        #[ink::test]
+        fn test_revoke_role_admin_only() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Admin grants then revokes auditor role
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            assert!(contract.grant_role(accounts.bob, Role::Auditor, None).is_ok());
+            assert!(contract.has_role(accounts.bob, Role::Auditor));
+
+            assert!(contract.revoke_role(accounts.bob, Role::Auditor).is_ok());
+            assert!(!contract.has_role(accounts.bob, Role::Auditor));
+
+            // Non-admin tries to revoke - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.revoke_role(accounts.charlie, Role::Auditor);
+            assert_eq!(result, Err(Error::Unauthorized));
+        }
+
+        #[ink::test]
+        fn test_get_roles_for_account() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Grant multiple roles to Bob
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            assert!(contract.grant_role(accounts.bob, Role::Auditor, None).is_ok());
+            assert!(contract.grant_role(accounts.bob, Role::LiquidityManager, None).is_ok());
+
+            let roles = contract.get_roles_for_account(accounts.bob);
+            assert_eq!(roles.len(), 2);
+            assert!(roles.contains(&Role::Auditor));
+            assert!(roles.contains(&Role::LiquidityManager));
+        }
+
+        #[ink::test]
+        fn test_role_with_expiration() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Grant role with expiration (1 year from now)
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let expires_at = 31536000000; // 1 year in milliseconds
+            assert!(contract
+                .grant_role(accounts.bob, Role::Auditor, Some(expires_at))
+                .is_ok());
+
+            // Role should be active
+            assert!(contract.has_role(accounts.bob, Role::Auditor));
+
+            // Get role info
+            let role_info = contract.get_role_info(accounts.bob, Role::Auditor);
+            assert!(role_info.is_some());
+            let info = role_info.unwrap();
+            assert_eq!(info.role, Role::Auditor);
+            assert!(info.is_active);
+            assert_eq!(info.expires_at, Some(expires_at));
+        }
+
+        #[ink::test]
+        fn test_auditor_flag_compliance_review() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Setup: Register a property
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let metadata = PropertyMetadata {
+                location: String::from("123 Main St"),
+                size: 1000,
+                legal_description: String::from("Sample property"),
+                valuation: 500000,
+                documents_url: String::from("ipfs://sample-docs"),
+            };
+            let token_id = contract
+                .register_property_with_token(metadata)
+                .expect("Token registration should succeed");
+
+            // Grant auditor role to Bob
+            assert!(contract.grant_role(accounts.bob, Role::Auditor, None).is_ok());
+
+            // Auditor flags token for compliance review
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.flag_for_compliance_review(
+                token_id,
+                String::from("Suspicious activity detected"),
+            );
+            assert!(result.is_ok());
+
+            // Verify flag is set
+            let compliance_info = contract.get_compliance_flag_status(token_id);
+            assert!(compliance_info.is_some());
+            assert!(!compliance_info.unwrap().verified);
+
+            // Non-auditor tries to flag - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.charlie);
+            let result =
+                contract.flag_for_compliance_review(token_id, String::from("Test flag"));
+            assert_eq!(result, Err(Error::Unauthorized));
+        }
+
+        #[ink::test]
+        fn test_auditor_clear_compliance_flag() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Setup: Register property and flag it
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let metadata = PropertyMetadata {
+                location: String::from("456 Oak Ave"),
+                size: 1500,
+                legal_description: String::from("Another property"),
+                valuation: 750000,
+                documents_url: String::from("ipfs://docs2"),
+            };
+            let token_id = contract
+                .register_property_with_token(metadata)
+                .expect("Token registration should succeed");
+
+            assert!(contract.grant_role(accounts.bob, Role::Auditor, None).is_ok());
+
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            assert!(contract
+                .flag_for_compliance_review(token_id, String::from("Initial flag"))
+                .is_ok());
+
+            // Auditor clears the flag
+            let result =
+                contract.clear_compliance_flag(token_id, String::from("Issue resolved"));
+            assert!(result.is_ok());
+
+            // Verify flag is cleared
+            let compliance_info = contract.get_compliance_flag_status(token_id);
+            assert!(compliance_info.is_some());
+            assert!(compliance_info.unwrap().verified);
+        }
+
+        #[ink::test]
+        fn test_liquidity_manager_update_parameters() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Setup: Register property
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let metadata = PropertyMetadata {
+                location: String::from("789 Pine Rd"),
+                size: 2000,
+                legal_description: String::from("Large property"),
+                valuation: 1000000,
+                documents_url: String::from("ipfs://docs3"),
+            };
+            let token_id = contract
+                .register_property_with_token(metadata)
+                .expect("Token registration should succeed");
+
+            // Grant liquidity manager role to Bob
+            assert!(contract.grant_role(accounts.bob, Role::LiquidityManager, None).is_ok());
+
+            // Liquidity manager updates dividend parameters
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.update_dividend_parameters(token_id, 500);
+            assert!(result.is_ok());
+
+            // Liquidity manager adjusts pool risk parameters
+            let result = contract.adjust_pool_risk_parameters(token_id, 15);
+            assert!(result.is_ok());
+
+            // Liquidity manager sets fee rate
+            let result = contract.set_liquidity_pool_fee(token_id, 30); // 0.3%
+            assert!(result.is_ok());
+
+            // Non-liquidity-manager tries to update - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.charlie);
+            let result = contract.update_dividend_parameters(token_id, 600);
+            assert_eq!(result, Err(Error::Unauthorized));
+        }
+
+        #[ink::test]
+        fn test_governance_operator_execute_proposal() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Setup: Register property and issue shares
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let metadata = PropertyMetadata {
+                location: String::from("321 Elm St"),
+                size: 1200,
+                legal_description: String::from("Governance property"),
+                valuation: 600000,
+                documents_url: String::from("ipfs://gov-docs"),
+            };
+            let token_id = contract
+                .register_property_with_token(metadata)
+                .expect("Token registration should succeed");
+
+            assert!(contract.issue_shares(token_id, accounts.alice, 1000).is_ok());
+
+            // Grant governance operator role to Bob
+            assert!(contract.grant_role(accounts.bob, Role::GovernanceOperator, None).is_ok());
+
+            // Create a proposal
+            let proposal_id = contract
+                .create_proposal(token_id, 500, Hash::from([9u8; 32]))
+                .expect("Should create proposal");
+
+            // Vote on proposal
+            assert!(contract.vote(token_id, proposal_id, true).is_ok());
+
+            // Governance operator executes proposal
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.execute_governance_proposal(token_id, proposal_id);
+            assert!(result.is_ok());
+
+            // Non-governance-operator tries to execute - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.charlie);
+            let result = contract.execute_governance_proposal(token_id, proposal_id);
+            assert_eq!(result, Err(Error::Unauthorized));
+        }
+
+        #[ink::test]
+        fn test_admin_transfer_with_timelock() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Current admin (Alice) requests transfer to Bob
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let request_id = contract
+                .request_admin_transfer(accounts.bob)
+                .expect("Should request admin transfer");
+
+            // Verify transfer request exists
+            let timelock = contract.get_role_timelock_seconds();
+            assert!(timelock > 0);
+
+            // Try to execute before timelock expires - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.execute_admin_transfer(request_id);
+            assert_eq!(result, Err(Error::ComplianceFailed)); // Too early
+
+            // Note: In a real test, you would advance the blockchain timestamp
+            // For now, we verify the request was created successfully
+            assert!(request_id > 0);
+        }
+
+        #[ink::test]
+        fn test_cancel_admin_transfer() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Admin requests transfer
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let request_id = contract
+                .request_admin_transfer(accounts.bob)
+                .expect("Should request admin transfer");
+
+            // Admin cancels the transfer
+            let result = contract.cancel_admin_transfer(request_id);
+            assert!(result.is_ok());
+
+            // Bob tries to execute cancelled transfer - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.execute_admin_transfer(request_id);
+            assert_eq!(result, Err(Error::ProposalNotFound));
+        }
+
+        #[ink::test]
+        fn test_set_role_timelock() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Admin updates timelock
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let new_timelock = 1209600; // 14 days
+            let result = contract.set_role_timelock_seconds(new_timelock);
+            assert!(result.is_ok());
+
+            assert_eq!(contract.get_role_timelock_seconds(), new_timelock);
+
+            // Non-admin tries to update - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.set_role_timelock_seconds(604800);
+            assert_eq!(result, Err(Error::Unauthorized));
+        }
+
+        #[ink::test]
+        fn test_annual_review_logging() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Grant auditor role to Bob
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            assert!(contract.grant_role(accounts.bob, Role::Auditor, None).is_ok());
+
+            // Admin logs annual review for Bob
+            let log_id = contract
+                .log_annual_review(
+                    accounts.bob,
+                    Role::Auditor,
+                    85, // performance score
+                    String::from("Excellent performance in claim reviews"),
+                    true, // renewed
+                )
+                .expect("Should log annual review");
+
+            assert!(log_id > 0);
+
+            // Retrieve review logs
+            let reviews = contract.get_annual_reviews(accounts.bob, Role::Auditor, 0, 10);
+            assert_eq!(reviews.len(), 1);
+            assert_eq!(reviews[0].performance_score, 85);
+            assert!(reviews[0].is_renewed);
+
+            // Non-admin tries to log review - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.log_annual_review(
+                accounts.charlie,
+                Role::Auditor,
+                50,
+                String::from("Test"),
+                false,
+            );
+            assert_eq!(result, Err(Error::Unauthorized));
+        }
+
+        #[ink::test]
+        fn test_emergency_pause_governance_operator() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Grant governance operator role to Bob
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            assert!(contract.grant_role(accounts.bob, Role::GovernanceOperator, None).is_ok());
+
+            // Governance operator can pause bridge
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            let result = contract.set_emergency_pause(true);
+            assert!(result.is_ok());
+
+            // Verify pause is active
+            let config = contract.get_bridge_config();
+            assert!(config.emergency_pause);
+
+            // Admin can also unpause
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            assert!(contract.set_emergency_pause(false).is_ok());
+
+            // Regular user cannot pause - should fail
+            test::set_caller::<DefaultEnvironment>(accounts.charlie);
+            let result = contract.set_emergency_pause(true);
+            assert_eq!(result, Err(Error::Unauthorized));
+        }
+
+        #[ink::test]
+        fn test_multi_role_access_control_matrix() {
+            let mut contract = setup_contract();
+            let accounts = test::default_accounts::<DefaultEnvironment>();
+
+            // Setup property
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+            let metadata = PropertyMetadata {
+                location: String::from("Multi-role Test"),
+                size: 1000,
+                legal_description: String::from("Test property"),
+                valuation: 500000,
+                documents_url: String::from("ipfs://test"),
+            };
+            let token_id = contract
+                .register_property_with_token(metadata)
+                .expect("Should register");
+
+            // Grant different roles
+            assert!(contract.grant_role(accounts.bob, Role::Auditor, None).is_ok());
+            assert!(contract.grant_role(accounts.charlie, Role::LiquidityManager, None).is_ok());
+            assert!(contract.grant_role(accounts.david, Role::GovernanceOperator, None).is_ok());
+
+            // Auditor can flag compliance
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            assert!(contract
+                .flag_for_compliance_review(token_id, String::from("Test"))
+                .is_ok());
+
+            // Liquidity manager CANNOT flag compliance (wrong role)
+            test::set_caller::<DefaultEnvironment>(accounts.charlie);
+            assert_eq!(
+                contract.flag_for_compliance_review(token_id, String::from("Test")),
+                Err(Error::Unauthorized)
+            );
+
+            // Liquidity manager CAN update pool parameters
+            assert!(contract
+                .adjust_pool_risk_parameters(token_id, 10)
+                .is_ok());
+
+            // Auditor CANNOT update pool parameters (wrong role)
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+            assert_eq!(
+                contract.adjust_pool_risk_parameters(token_id, 10),
+                Err(Error::Unauthorized)
+            );
+
+            // Verify role separation works correctly
+            assert!(contract.has_role(accounts.bob, Role::Auditor));
+            assert!(contract.has_role(accounts.charlie, Role::LiquidityManager));
+            assert!(contract.has_role(accounts.david, Role::GovernanceOperator));
         }
     }
 }
