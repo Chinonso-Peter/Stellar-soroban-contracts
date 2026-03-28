@@ -10,6 +10,11 @@ pub enum PoolError {
     PoolNotFound = 4,
     InvalidParameters = 5,
     InsufficientVestedRewards = 6,
+    AppealNotFound = 7,
+    AppealAlreadyResolved = 8,
+    InvalidAppealStatus = 9,
+    ReinsurerNotFound = 10,
+    InvalidPercentage = 11,
 }
 
 #[contracttype]
@@ -48,6 +53,30 @@ pub struct LiquidityProvider {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AppealStatus { Pending, Approved, Rejected }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlashingAppeal {
+    pub claim_id: u64,
+    pub appealer: Address,
+    pub deposit: i128,
+    pub slashed_amount: i128,
+    pub status: AppealStatus,
+    pub deadline: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReinsuranceConfig {
+    pub reinsurer: Address,
+    pub percentage: u32, // basis points
+    pub ceded_premiums: i128,
+    pub credit_score: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PoolEvent {
     Deposit(Address, i128),
     Withdraw(Address, i128),
@@ -55,6 +84,9 @@ pub enum PoolEvent {
     VestedRewardsClaimed(Address, i128, i128), // provider, amount, penalty
     ContractPaused(Address, Option<Symbol>),
     ContractUnpaused(Address, Option<Symbol>),
+    SlashingAppealed(u64, Address, i128),
+    AppealResolved(u64, bool, i128),
+    RiskCeded(Address, u32, i128),
 }
 
 const ADMIN: Symbol = symbol_short!("ADMIN");
@@ -64,6 +96,8 @@ const BALANCE: Symbol = symbol_short!("BALANCE");
 const LP_ACCOUNT: Symbol = symbol_short!("LP_ACC");
 const VESTING_CONFIG: Symbol = symbol_short!("VEST_CONF");
 const VESTING_STATS: Symbol = symbol_short!("VEST_STATS");
+const APPEALS: Symbol = symbol_short!("APPEALS");
+const REINSURANCE: Symbol = symbol_short!("REINSURE");
 
 #[contract]
 pub struct RiskPoolContract;
@@ -282,5 +316,75 @@ impl RiskPoolContract {
 
     pub fn get_balance(env: Env) -> i128 {
         env.storage().instance().get(&BALANCE).unwrap_or(0)
+    }
+
+    pub fn appeal_slashing(env: Env, appealer: Address, claim_id: u64, deposit: i128, slashed_amount: i128) -> Result<(), PoolError> {
+        if Self::is_paused(env.clone()) { return Err(PoolError::ContractPaused); }
+        appealer.require_auth();
+
+        let key = (APPEALS, claim_id);
+        if env.storage().persistent().has(&key) { return Err(PoolError::InvalidParameters); }
+
+        let deadline = env.ledger().timestamp().saturating_add(7 * 86400); // 7 days voting period
+        let appeal = SlashingAppeal {
+            claim_id,
+            appealer: appealer.clone(),
+            deposit,
+            slashed_amount,
+            status: AppealStatus::Pending,
+            deadline,
+        };
+
+        env.storage().persistent().set(&key, &appeal);
+        env.events().publish((APPEALS, symbol_short!("NEW")), PoolEvent::SlashingAppealed(claim_id, appealer, deposit));
+        Ok(())
+    }
+
+    pub fn resolve_appeal(env: Env, caller: Address, claim_id: u64, approved: bool, refund_percentage: u32) -> Result<(), PoolError> {
+        caller.require_auth();
+        if !Self::is_admin_or_guardian(&env, &caller) { return Err(PoolError::Unauthorized); }
+        if refund_percentage > 10000 { return Err(PoolError::InvalidPercentage); }
+
+        let key = (APPEALS, claim_id);
+        let mut appeal: SlashingAppeal = env.storage().persistent().get(&key).ok_or(PoolError::AppealNotFound)?;
+        if appeal.status != AppealStatus::Pending { return Err(PoolError::AppealAlreadyResolved); }
+
+        let mut refund_amount = 0;
+        if approved {
+            appeal.status = AppealStatus::Approved;
+            refund_amount = (appeal.slashed_amount * refund_percentage as i128) / 10000;
+            refund_amount += appeal.deposit; // Full refund of deposit on success
+        } else {
+            appeal.status = AppealStatus::Rejected;
+            // Deposit is forfeited on failure
+        }
+
+        env.storage().persistent().set(&key, &appeal);
+        env.events().publish((APPEALS, symbol_short!("RESOLVE")), PoolEvent::AppealResolved(claim_id, approved, refund_amount));
+        Ok(())
+    }
+
+    pub fn set_reinsurance_config(env: Env, caller: Address, reinsurer: Address, percentage: u32, credit_score: u32) -> Result<(), PoolError> {
+        caller.require_auth();
+        if !Self::is_admin_or_guardian(&env, &caller) { return Err(PoolError::Unauthorized); }
+        if percentage > 10000 { return Err(PoolError::InvalidPercentage); }
+
+        let config = ReinsuranceConfig { reinsurer: reinsurer.clone(), percentage, ceded_premiums: 0, credit_score };
+        env.storage().persistent().set(&(REINSURANCE, reinsurer), &config);
+        Ok(())
+    }
+
+    pub fn cede_risk(env: Env, reinsurer: Address, amount: i128) -> Result<(), PoolError> {
+        if Self::is_paused(env.clone()) { return Err(PoolError::ContractPaused); }
+
+        let key = (REINSURANCE, reinsurer.clone());
+        let mut config: ReinsuranceConfig = env.storage().persistent().get(&key).ok_or(PoolError::ReinsurerNotFound)?;
+
+        let ceded_amount = (amount * config.percentage as i128) / 10000;
+        config.ceded_premiums = config.ceded_premiums.saturating_add(ceded_amount);
+
+        env.storage().persistent().set(&key, &config);
+        env.events().publish((REINSURANCE, symbol_short!("CEDE")), PoolEvent::RiskCeded(reinsurer, config.percentage, ceded_amount));
+        Ok(())
     }
 }

@@ -23,6 +23,20 @@ pub struct ClaimRecord {
     pub status: ClaimStatus,
     pub claimant: Address,
     pub evidence_count: u32,
+    pub fraud_score: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FraudStatus { Clean, Suspicious, Confirmed }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimFraudInfo {
+    pub is_duplicate: bool,
+    pub velocity_score: u32,
+    pub compliance_checked: bool,
+    pub reputation_score: u32,
 }
 
 #[contracttype]
@@ -48,6 +62,8 @@ const EVIDENCE_SEQ: Symbol = symbol_short!("EVIDENCE_SEQ");
 const ADMIN: Symbol = symbol_short!("ADMIN");
 const GUARDIAN: Symbol = symbol_short!("GUARDIAN");
 const PAUSE_STATE: Symbol = symbol_short!("PAUSED");
+const FRAUD_INFO: Symbol = symbol_short!("FRAUD");
+const CLAIM_HISTORY: Symbol = symbol_short!("HISTORY");
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -68,6 +84,8 @@ pub enum ClaimsEvent {
     EvidenceVerified(u64, Address, bool), // evidence_id, verifier, is_valid
     ContractPaused(Address, Option<Symbol>),
     ContractUnpaused(Address, Option<Symbol>),
+    FraudFlagged(u64, u32),
+    FraudConfirmed(u64),
 }
 
 #[derive(soroban_sdk::contracterror, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -83,6 +101,7 @@ pub enum ClaimError {
     AlreadySettled = 8,
     ContractPaused = 9,
     Unauthorized = 10,
+    ClaimFlaggedAsFraud = 11,
 }
 
 #[contract]
@@ -151,14 +170,38 @@ impl ClaimsContract {
         let coverage = policy.get_policy_coverage(&policy_id);
         let fee = amount / 100;
         if coverage <= amount + fee { return Err(ClaimError::InsufficientCoverage); }
+
+        // Duplicate Claim Detection
+        let mut fraud_score = 0;
+        let history_key = (CLAIM_HISTORY, policy_id, amount);
+        if env.storage().persistent().has(&history_key) {
+            fraud_score += 50; // High suspicion for same amount on same policy
+        }
+
+        // Velocity Check (simplified)
+        let policy_claims_count: u32 = env.storage().persistent().get(&(CLAIM_HISTORY, policy_id)).unwrap_or(0);
+        if policy_claims_count > 3 {
+            fraud_score += 20;
+        }
+
         env.storage().persistent().set(&(CLAIMS, claim_id), &ClaimRecord {
             policy_id,
             amount,
             status: ClaimStatus::Pending,
             claimant: policy_address.clone(),
             evidence_count: 0,
+            fraud_score,
         });
-        env.events().publish((CLAIMS, Symbol::short("SUBMIT")), ClaimsEvent::ClaimSubmitted(claim_id, policy_address, amount));
+
+        // Update history
+        env.storage().persistent().set(&history_key, &claim_id);
+        env.storage().persistent().set(&(CLAIM_HISTORY, policy_id), &(policy_claims_count + 1));
+
+        if fraud_score >= 70 {
+            env.events().publish((CLAIMS, symbol_short!("FRAUD")), ClaimsEvent::FraudFlagged(claim_id, fraud_score));
+        }
+
+        env.events().publish((CLAIMS, symbol_short!("SUBMIT")), ClaimsEvent::ClaimSubmitted(claim_id, policy_address, amount));
         Ok(())
     }
 
@@ -288,9 +331,39 @@ impl ClaimsContract {
         let mut r: ClaimRecord = env.storage().persistent().get(&key).ok_or(ClaimError::ClaimNotFound)?;
         if r.status == ClaimStatus::Settled { return Err(ClaimError::AlreadySettled); }
         if r.status != ClaimStatus::Approved { return Err(ClaimError::ClaimNotApproved); }
+        if r.fraud_score >= 80 { return Err(ClaimError::ClaimFlaggedAsFraud); }
         r.status = ClaimStatus::Settled;
         env.storage().persistent().set(&key, &r);
         env.events().publish((CLAIMS, Symbol::short("SETTLE")), ClaimsEvent::ClaimSettled(claim_id));
+        Ok(())
+    }
+
+    pub fn flag_claim_for_review(env: Env, caller: Address, claim_id: u64, score_adjustment: i32) -> Result<(), ClaimError> {
+        caller.require_auth();
+        if !Self::is_admin_or_guardian(&env, &caller) { return Err(ClaimError::Unauthorized); }
+
+        let key = (CLAIMS, claim_id);
+        let mut r: ClaimRecord = env.storage().persistent().get(&key).ok_or(ClaimError::ClaimNotFound)?;
+        
+        let new_score = (r.fraud_score as i32).saturating_add(score_adjustment);
+        r.fraud_score = if new_score < 0 { 0 } else { new_score as u32 };
+        
+        env.storage().persistent().set(&key, &r);
+        env.events().publish((CLAIMS, symbol_short!("REVIEW")), ClaimsEvent::FraudFlagged(claim_id, r.fraud_score));
+        Ok(())
+    }
+
+    pub fn report_fraud(env: Env, caller: Address, claim_id: u64) -> Result<(), ClaimError> {
+        caller.require_auth();
+        if !Self::is_admin_or_guardian(&env, &caller) { return Err(ClaimError::Unauthorized); }
+
+        let key = (CLAIMS, claim_id);
+        let mut r: ClaimRecord = env.storage().persistent().get(&key).ok_or(ClaimError::ClaimNotFound)?;
+        r.status = ClaimStatus::Rejected;
+        r.fraud_score = 100;
+
+        env.storage().persistent().set(&key, &r);
+        env.events().publish((CLAIMS, symbol_short!("FRAUD_CFM")), ClaimsEvent::FraudConfirmed(claim_id));
         Ok(())
     }
 }

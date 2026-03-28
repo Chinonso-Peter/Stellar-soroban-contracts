@@ -38,6 +38,23 @@ pub struct PolicyRecord {
     pub status: PolicyStatus,
     pub issued_at: u64,
     pub expires_at: u64,
+    pub total_fractions: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AmmPool {
+    pub policy_id: u64,
+    pub token_balance: i128,
+    pub stable_balance: i128,
+    pub total_shares: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiquidityPosition {
+    pub provider: Address,
+    pub shares: i128,
 }
 
 #[contracttype]
@@ -60,6 +77,8 @@ const POLICY_COUNT: Symbol = symbol_short!("POLICY_COUNT");
 const ADMIN: Symbol = symbol_short!("ADMIN");
 const GUARDIAN: Symbol = symbol_short!("GUARDIAN");
 const PAUSE_STATE: Symbol = symbol_short!("PAUSED");
+const AMM_POOLS: Symbol = symbol_short!("AMM_POOLS");
+const LP_POSITIONS: Symbol = symbol_short!("LP_POS");
 
 #[contract]
 pub struct PolicyContract;
@@ -139,7 +158,7 @@ impl PolicyContract {
         let expires_at = now.saturating_add(Self::DEFAULT_POLICY_DURATION_SECS);
 
         let key = (POLICIES, policy_id);
-        env.storage().persistent().set(&key, &PolicyRecord { coverage, premium, holder: holder.clone(), status: PolicyStatus::Active, issued_at: now, expires_at });
+        env.storage().persistent().set(&key, &PolicyRecord { coverage, premium, holder: holder.clone(), status: PolicyStatus::Active, issued_at: now, expires_at, total_fractions: 10000 });
 
         let next_index = Self::increment_policy_count(&env);
         Self::record_policy_index(&env, next_index, policy_id);
@@ -156,7 +175,7 @@ impl PolicyContract {
         let expires_at = now.saturating_add(duration_secs);
 
         let key = (POLICIES, policy_id);
-        env.storage().persistent().set(&key, &PolicyRecord { coverage, premium, holder: holder.clone(), status: PolicyStatus::Active, issued_at: now, expires_at });
+        env.storage().persistent().set(&key, &PolicyRecord { coverage, premium, holder: holder.clone(), status: PolicyStatus::Active, issued_at: now, expires_at, total_fractions: 10000 });
 
         let next_index = Self::increment_policy_count(&env);
         Self::record_policy_index(&env, next_index, policy_id);
@@ -252,6 +271,56 @@ impl PolicyContract {
             Some(r) => r.coverage,
             None => 0,
         }
+    }
+
+    pub fn create_amm_pool(env: Env, policy_id: u64, stable_amount: i128) -> Result<(), PolicyError> {
+        if !Self::is_policy_active(env.clone(), policy_id) { return Err(PolicyError::PolicyNotFound); }
+        
+        let amm_key = (AMM_POOLS, policy_id);
+        if env.storage().persistent().has(&amm_key) { return Err(PolicyError::InvalidParameters); }
+
+        let pool = AmmPool {
+            policy_id,
+            token_balance: 10000, // Total fractions
+            stable_balance: stable_amount,
+            total_shares: stable_amount,
+        };
+
+        env.storage().persistent().set(&amm_key, &pool);
+        Ok(())
+    }
+
+    pub fn get_pool_price(env: Env, policy_id: u64) -> Result<i128, PolicyError> {
+        let amm_key = (AMM_POOLS, policy_id);
+        let pool: AmmPool = env.storage().persistent().get(&amm_key).ok_or(PolicyError::PolicyNotFound)?;
+        
+        if pool.token_balance == 0 { return Ok(0); }
+        
+        // Simple x * y = k price. Price = y / x
+        let price = (pool.stable_balance * 10000) / pool.token_balance;
+        Ok(price)
+    }
+
+    pub fn swap_policy_fraction(env: Env, buyer: Address, policy_id: u64, stable_in: i128) -> Result<i128, PolicyError> {
+        buyer.require_auth();
+        let amm_key = (AMM_POOLS, policy_id);
+        let mut pool: AmmPool = env.storage().persistent().get(&amm_key).ok_or(PolicyError::PolicyNotFound)?;
+
+        // x * y = k constant product
+        // (x - dx) * (y + dy) = x * y
+        // dx = x - (x * y) / (y + dy)
+        let k = pool.token_balance * pool.stable_balance;
+        let new_stable_balance = pool.stable_balance + stable_in;
+        let new_token_balance = k / new_stable_balance;
+        let tokens_out = pool.token_balance - new_token_balance;
+
+        if tokens_out <= 0 { return Err(PolicyError::InvalidParameters); }
+
+        pool.stable_balance = new_stable_balance;
+        pool.token_balance = new_token_balance;
+        
+        env.storage().persistent().set(&amm_key, &pool);
+        Ok(tokens_out)
     }
 }
 
