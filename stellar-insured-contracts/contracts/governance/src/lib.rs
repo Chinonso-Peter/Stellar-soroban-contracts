@@ -297,7 +297,7 @@ impl GovernanceContract {
         threshold_weight: u32,
     ) -> Result<(), GovernanceError> {
         let data: GovernanceData = env.storage().instance().get(&DATA_KEY).unwrap_or_panic();
-        
+
         // Only admin can configure multi-sig
         if admin != data.admin {
             return Err(GovernanceError::NotAuthorized);
@@ -341,11 +341,14 @@ impl GovernanceContract {
         caller: Address,
         new_threshold: u32,
     ) -> Result<(), GovernanceError> {
-        let mut config: MultiSigConfig = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY)
+        let mut config: MultiSigConfig = env
+            .storage()
+            .instance()
+            .get(&MULTI_SIG_CONFIG_KEY)
             .ok_or(GovernanceError::MultiSigNotConfigured)?;
 
         let data: GovernanceData = env.storage().instance().get(&DATA_KEY).unwrap_or_panic();
-        
+
         // Either admin or multi-sig approval required
         let is_admin = caller == data.admin;
         let is_multi_sig_approved = Self::is_signer(env, &caller, &config);
@@ -379,7 +382,10 @@ impl GovernanceContract {
         signer_address: Address,
         weight: u32,
     ) -> Result<(), GovernanceError> {
-        let mut config: MultiSigConfig = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY)
+        let mut config: MultiSigConfig = env
+            .storage()
+            .instance()
+            .get(&MULTI_SIG_CONFIG_KEY)
             .ok_or(GovernanceError::MultiSigNotConfigured)?;
 
         // Check if already a signer
@@ -416,7 +422,10 @@ impl GovernanceContract {
         caller: Address,
         signer_address: Address,
     ) -> Result<(), GovernanceError> {
-        let mut config: MultiSigConfig = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY)
+        let mut config: MultiSigConfig = env
+            .storage()
+            .instance()
+            .get(&MULTI_SIG_CONFIG_KEY)
             .ok_or(GovernanceError::MultiSigNotConfigured)?;
 
         // Require multi-sig approval for removing signers
@@ -480,7 +489,10 @@ impl GovernanceContract {
         target_contract: Option<Address>,
         expiry_seconds: u64,
     ) -> Result<u64, GovernanceError> {
-        let config: MultiSigConfig = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY)
+        let config: MultiSigConfig = env
+            .storage()
+            .instance()
+            .get(&MULTI_SIG_CONFIG_KEY)
             .ok_or(GovernanceError::MultiSigNotConfigured)?;
 
         // Creator must be a signer
@@ -489,7 +501,10 @@ impl GovernanceContract {
         }
 
         // Get next proposal ID
-        let next_proposal_id: u64 = env.storage().instance().get(&Symbol::short("MSIG_NEXT_ID"))
+        let next_proposal_id: u64 = env
+            .storage()
+            .instance()
+            .get(&Symbol::short("MSIG_NEXT_ID"))
             .unwrap_or(1);
 
         let current_time = env.ledger().timestamp();
@@ -518,7 +533,9 @@ impl GovernanceContract {
         Self::confirm_multi_sig_proposal(env, creator.clone(), next_proposal_id)?;
 
         // Update next proposal ID
-        env.storage().instance().set(&Symbol::short("MSIG_NEXT_ID"), &(next_proposal_id + 1));
+        env.storage()
+            .instance()
+            .set(&Symbol::short("MSIG_NEXT_ID"), &(next_proposal_id + 1));
 
         Ok(next_proposal_id)
     }
@@ -529,7 +546,10 @@ impl GovernanceContract {
         signer: Address,
         proposal_id: u64,
     ) -> Result<(), GovernanceError> {
-        let config: MultiSigConfig = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY)
+        let config: MultiSigConfig = env
+            .storage()
+            .instance()
+            .get(&MULTI_SIG_CONFIG_KEY)
             .ok_or(GovernanceError::MultiSigNotConfigured)?;
 
         // Check if signer is valid
@@ -539,7 +559,10 @@ impl GovernanceContract {
 
         // Get proposal
         let proposal_key = (MULTI_SIG_PROPOSAL_KEY, proposal_id);
-        let mut proposal: MultiSigProposal = env.storage().persistent().get(&proposal_key)
+        let mut proposal: MultiSigProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
             .ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check if already executed
@@ -568,7 +591,9 @@ impl GovernanceContract {
             weight: signer_weight,
             confirmed_at: current_time,
         };
-        env.storage().persistent().set(&confirmation_key, &confirmation);
+        env.storage()
+            .persistent()
+            .set(&confirmation_key, &confirmation);
 
         // Update proposal confirmed weight
         proposal.confirmed_weight += signer_weight;
@@ -583,12 +608,18 @@ impl GovernanceContract {
         signer: Address,
         proposal_id: u64,
     ) -> Result<(), GovernanceError> {
-        let config: MultiSigConfig = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY)
+        let config: MultiSigConfig = env
+            .storage()
+            .instance()
+            .get(&MULTI_SIG_CONFIG_KEY)
             .ok_or(GovernanceError::MultiSigNotConfigured)?;
 
         // Get proposal
         let proposal_key = (MULTI_SIG_PROPOSAL_KEY, proposal_id);
-        let mut proposal: MultiSigProposal = env.storage().persistent().get(&proposal_key)
+        let mut proposal: MultiSigProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
             .ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check if already executed
@@ -598,7 +629,10 @@ impl GovernanceContract {
 
         // Get confirmation
         let confirmation_key = (MULTI_SIG_CONFIRMATIONS_KEY, proposal_id, signer.clone());
-        let confirmation: Confirmation = env.storage().persistent().get(&confirmation_key)
+        let confirmation: Confirmation = env
+            .storage()
+            .persistent()
+            .get(&confirmation_key)
             .ok_or(GovernanceError::MultiSigNotConfirmed)?;
 
         // Remove confirmation
@@ -617,12 +651,18 @@ impl GovernanceContract {
         executor: Address,
         proposal_id: u64,
     ) -> Result<(), GovernanceError> {
-        let config: MultiSigConfig = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY)
+        let config: MultiSigConfig = env
+            .storage()
+            .instance()
+            .get(&MULTI_SIG_CONFIG_KEY)
             .ok_or(GovernanceError::MultiSigNotConfigured)?;
 
         // Get proposal
         let proposal_key = (MULTI_SIG_PROPOSAL_KEY, proposal_id);
-        let mut proposal: MultiSigProposal = env.storage().persistent().get(&proposal_key)
+        let mut proposal: MultiSigProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
             .ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check if already executed
@@ -644,17 +684,23 @@ impl GovernanceContract {
         // Execute based on operation type
         match &proposal.operation_type {
             OperationType::Pause => {
-                let reason = proposal.operation_data.get(&Symbol::short("reason"))
+                let reason = proposal
+                    .operation_data
+                    .get(&Symbol::short("reason"))
                     .unwrap_or(String::from_str(env, "Multi-sig pause"));
                 Self::execute_multi_sig_pause(env, proposal_id, reason)?;
             }
             OperationType::Unpause => {
-                let reason = proposal.operation_data.get(&Symbol::short("reason"))
+                let reason = proposal
+                    .operation_data
+                    .get(&Symbol::short("reason"))
                     .unwrap_or(String::from_str(env, "Multi-sig unpause"));
                 Self::execute_multi_sig_unpause(env, proposal_id, reason)?;
             }
             OperationType::UpdateParameter(param_name) => {
-                let new_value = proposal.operation_data.get(&Symbol::short("value"))
+                let new_value = proposal
+                    .operation_data
+                    .get(&Symbol::short("value"))
                     .ok_or(GovernanceError::NotAuthorized)?;
                 Self::execute_multi_sig_parameter_update(env, param_name.clone(), new_value)?;
             }
@@ -662,16 +708,27 @@ impl GovernanceContract {
                 Self::execute_multi_sig_emergency_shutdown(env, proposal_id)?;
             }
             OperationType::UpgradeContract => {
-                let new_code_hash = proposal.operation_data.get(&Symbol::short("code_hash"))
+                let new_code_hash = proposal
+                    .operation_data
+                    .get(&Symbol::short("code_hash"))
                     .ok_or(GovernanceError::NotAuthorized)?;
                 Self::execute_multi_sig_upgrade(env, proposal_id, new_code_hash)?;
             }
             OperationType::TreasuryWithdraw => {
-                let amount_str = proposal.operation_data.get(&Symbol::short("amount"))
+                let amount_str = proposal
+                    .operation_data
+                    .get(&Symbol::short("amount"))
                     .ok_or(GovernanceError::NotAuthorized)?;
-                let recipient_str = proposal.operation_data.get(&Symbol::short("recipient"))
+                let recipient_str = proposal
+                    .operation_data
+                    .get(&Symbol::short("recipient"))
                     .ok_or(GovernanceError::NotAuthorized)?;
-                Self::execute_multi_sig_treasury_withdraw(env, proposal_id, amount_str, recipient_str)?;
+                Self::execute_multi_sig_treasury_withdraw(
+                    env,
+                    proposal_id,
+                    amount_str,
+                    recipient_str,
+                )?;
             }
             _ => {
                 panic!("Unsupported operation type");
@@ -687,34 +744,44 @@ impl GovernanceContract {
     }
 
     // Get multi-sig proposal details
-    pub fn get_multi_sig_proposal(env: &Env, proposal_id: u64) -> Result<MultiSigProposal, GovernanceError> {
+    pub fn get_multi_sig_proposal(
+        env: &Env,
+        proposal_id: u64,
+    ) -> Result<MultiSigProposal, GovernanceError> {
         let proposal_key = (MULTI_SIG_PROPOSAL_KEY, proposal_id);
-        env.storage().persistent().get(&proposal_key)
+        env.storage()
+            .persistent()
+            .get(&proposal_key)
             .ok_or(GovernanceError::ProposalNotFound)
     }
 
     // Get confirmations for a multi-sig proposal
     pub fn get_multi_sig_confirmations(env: &Env, proposal_id: u64) -> Vec<Confirmation> {
         let mut confirmations = Vec::new(env);
-        
+
         // Iterate through all storage keys to find confirmations for this proposal
         // Note: In production, you'd want a more efficient indexing mechanism
         let data: GovernanceData = env.storage().instance().get(&DATA_KEY).unwrap_or_panic();
-        
+
         for i in 1..data.next_proposal_id {
             // Try to get confirmation for each potential signer
             // This is a simplified approach - in production use a proper index
-            let config: Option<MultiSigConfig> = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY);
+            let config: Option<MultiSigConfig> =
+                env.storage().instance().get(&MULTI_SIG_CONFIG_KEY);
             if let Some(config) = config {
                 for signer in config.signers.iter() {
-                    let confirmation_key = (MULTI_SIG_CONFIRMATIONS_KEY, proposal_id, signer.address.clone());
+                    let confirmation_key = (
+                        MULTI_SIG_CONFIRMATIONS_KEY,
+                        proposal_id,
+                        signer.address.clone(),
+                    );
                     if let Some(confirmation) = env.storage().persistent().get(&confirmation_key) {
                         confirmations.push_back(confirmation);
                     }
                 }
             }
         }
-        
+
         confirmations
     }
 
@@ -738,20 +805,26 @@ impl GovernanceContract {
         reason: String,
     ) -> Result<(), GovernanceError> {
         let current_time = env.ledger().timestamp();
-        
+
         // Get proposal to find creator
         let proposal_key = (MULTI_SIG_PROPOSAL_KEY, proposal_id);
-        let proposal: MultiSigProposal = env.storage().persistent().get(&proposal_key)
+        let proposal: MultiSigProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
             .ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check if already paused
-        let pause_state: PauseState = env.storage().instance().get(&PAUSE_STATE_KEY)
-            .unwrap_or(PauseState {
-                is_paused: false,
-                paused_at: None,
-                paused_by: None,
-                pause_reason: None,
-            });
+        let pause_state: PauseState =
+            env.storage()
+                .instance()
+                .get(&PAUSE_STATE_KEY)
+                .unwrap_or(PauseState {
+                    is_paused: false,
+                    paused_at: None,
+                    paused_by: None,
+                    pause_reason: None,
+                });
 
         if pause_state.is_paused {
             return Err(GovernanceError::ContractAlreadyPaused);
@@ -765,7 +838,9 @@ impl GovernanceContract {
             pause_reason: Some(reason.clone()),
         };
 
-        env.storage().instance().set(&PAUSE_STATE_KEY, &new_pause_state);
+        env.storage()
+            .instance()
+            .set(&PAUSE_STATE_KEY, &new_pause_state);
 
         // Add to pause history
         Self::add_pause_history_entry(
@@ -786,20 +861,26 @@ impl GovernanceContract {
         reason: String,
     ) -> Result<(), GovernanceError> {
         let current_time = env.ledger().timestamp();
-        
+
         // Get proposal to find creator
         let proposal_key = (MULTI_SIG_PROPOSAL_KEY, proposal_id);
-        let proposal: MultiSigProposal = env.storage().persistent().get(&proposal_key)
+        let proposal: MultiSigProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
             .ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check if not paused
-        let pause_state: PauseState = env.storage().instance().get(&PAUSE_STATE_KEY)
-            .unwrap_or(PauseState {
-                is_paused: false,
-                paused_at: None,
-                paused_by: None,
-                pause_reason: None,
-            });
+        let pause_state: PauseState =
+            env.storage()
+                .instance()
+                .get(&PAUSE_STATE_KEY)
+                .unwrap_or(PauseState {
+                    is_paused: false,
+                    paused_at: None,
+                    paused_by: None,
+                    pause_reason: None,
+                });
 
         if !pause_state.is_paused {
             return Err(GovernanceError::ContractNotPaused);
@@ -813,7 +894,9 @@ impl GovernanceContract {
             pause_reason: None,
         };
 
-        env.storage().instance().set(&PAUSE_STATE_KEY, &new_pause_state);
+        env.storage()
+            .instance()
+            .set(&PAUSE_STATE_KEY, &new_pause_state);
 
         // Add to pause history
         Self::add_pause_history_entry(
@@ -871,9 +954,12 @@ impl GovernanceContract {
     ) -> Result<(), GovernanceError> {
         // Emergency shutdown - pause all operations
         let current_time = env.ledger().timestamp();
-        
+
         let proposal_key = (MULTI_SIG_PROPOSAL_KEY, proposal_id);
-        let proposal: MultiSigProposal = env.storage().persistent().get(&proposal_key)
+        let proposal: MultiSigProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
             .ok_or(GovernanceError::ProposalNotFound)?;
 
         let new_pause_state = PauseState {
@@ -883,7 +969,9 @@ impl GovernanceContract {
             pause_reason: Some(String::from_str(env, "Emergency shutdown")),
         };
 
-        env.storage().instance().set(&PAUSE_STATE_KEY, &new_pause_state);
+        env.storage()
+            .instance()
+            .set(&PAUSE_STATE_KEY, &new_pause_state);
 
         Ok(())
     }
@@ -896,7 +984,7 @@ impl GovernanceContract {
     ) -> Result<(), GovernanceError> {
         // Note: Actual contract upgrade would require Soroban's upgrade mechanism
         // This is a placeholder for the upgrade logic
-        
+
         // Store the new code hash for reference
         let upgrade_key = (Symbol::short("PENDING_UPGRADE"), proposal_id);
         env.storage().persistent().set(&upgrade_key, &new_code_hash);
@@ -913,14 +1001,19 @@ impl GovernanceContract {
     ) -> Result<(), GovernanceError> {
         // Note: Actual withdrawal would require token contract integration
         // This is a placeholder for the withdrawal logic
-        
+
         // Store withdrawal request for processing
         let withdraw_key = (Symbol::short("PENDING_WITHDRAW"), proposal_id);
-        let withdraw_data = Map::from_array(env, &[
-            (Symbol::short("amount"), amount),
-            (Symbol::short("recipient"), recipient),
-        ]);
-        env.storage().persistent().set(&withdraw_key, &withdraw_data);
+        let withdraw_data = Map::from_array(
+            env,
+            &[
+                (Symbol::short("amount"), amount),
+                (Symbol::short("recipient"), recipient),
+            ],
+        );
+        env.storage()
+            .persistent()
+            .set(&withdraw_key, &withdraw_data);
 
         Ok(())
     }
@@ -1400,9 +1493,7 @@ impl GovernanceContract {
         // Check if multi-sig is enabled - if so, use multi-sig instead
         if Self::is_multi_sig_enabled(env) {
             // Create multi-sig pause proposal instead
-            let operation_data = Map::from_array(env, &[
-                (Symbol::short("reason"), reason.clone()),
-            ]);
+            let operation_data = Map::from_array(env, &[(Symbol::short("reason"), reason.clone())]);
             return Self::create_multi_sig_proposal(
                 env,
                 proposer,
@@ -1449,9 +1540,7 @@ impl GovernanceContract {
         // Check if multi-sig is enabled - if so, use multi-sig instead
         if Self::is_multi_sig_enabled(env) {
             // Create multi-sig unpause proposal instead
-            let operation_data = Map::from_array(env, &[
-                (Symbol::short("reason"), reason.clone()),
-            ]);
+            let operation_data = Map::from_array(env, &[(Symbol::short("reason"), reason.clone())]);
             return Self::create_multi_sig_proposal(
                 env,
                 proposer,

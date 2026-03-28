@@ -163,43 +163,6 @@ mod propchain_insurance {
         pub description: Option<String>,
     }
 
-    /// Enhanced evidence item with verification tracking
-    #[derive(
-        Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct EvidenceItem {
-        pub id: u64,
-        pub claim_id: u64,
-        pub evidence_type: String,           // photo, document, video, sensor_data, etc.
-        pub ipfs_hash: String,               // IPFS CID (e.g., "QmX...")
-        pub ipfs_uri: String,                // Full IPFS URI (ipfs://QmX...)
-        pub content_hash: Vec<u8>,           // SHA-256 hash of content (32 bytes)
-        pub file_size: u64,                  // Size in bytes (for cost calculation)
-        pub submitter: AccountId,            // Who submitted this evidence
-        pub submitted_at: u64,               // Timestamp of submission
-        pub verified: bool,                  // Whether evidence has been verified
-        pub verified_by: Option<AccountId>,  // Who verified it
-        pub verified_at: Option<u64>,        // When it was verified
-        pub verification_notes: Option<String>, // Optional notes from verifier
-        pub metadata_url: Option<String>,    // Additional metadata (JSON on IPFS)
-    }
-
-    /// Evidence verification record for audit trail
-    #[derive(
-        Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct EvidenceVerification {
-        pub evidence_id: u64,
-        pub verifier: AccountId,
-        pub verified_at: u64,
-        pub is_valid: bool,
-        pub notes: String,
-        ipfs_accessible: bool,           // Whether IPFS content was accessible
-        hash_matches: bool,              // Whether content hash matches
-    }
-
     #[derive(
         Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
     )]
@@ -234,8 +197,7 @@ mod propchain_insurance {
         pub claimant: AccountId,
         pub claim_amount: u128,
         pub description: String,
-        pub primary_evidence: EvidenceMetadata,  // Original single evidence (backward compat)
-        pub evidence_ids: Vec<u64>,              // IDs of all attached evidence items
+        pub evidence: EvidenceMetadata,
         pub oracle_report_url: String,
         pub status: ClaimStatus,
         pub submitted_at: u64,
@@ -295,185 +257,6 @@ mod propchain_insurance {
         pub annual_premium: u128,     // Final annual premium
         pub monthly_premium: u128,    // Monthly equivalent
         pub deductible: u128,
-    }
-
-    /// Dynamic premium calculation with full analytics
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct DynamicPremium {
-        pub base_premium: u128,
-        pub risk_adjusted_premium: u128,
-        pub market_adjusted_premium: u128,
-        pub location_factor: u32,
-        pub property_type_factor: u32,
-        pub coverage_factor: u32,
-        pub historical_claims_factor: u32,
-        pub market_condition_factor: u32,
-        pub final_premium: u128,
-        pub confidence_score: u32,
-        pub calculation_timestamp: u64,
-        pub valid_until: u64,
-    }
-
-    /// Risk scoring components for detailed analysis
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct RiskScoreComponents {
-        pub location_score: u32,
-        pub property_type_score: u32,
-        pub construction_score: u32,
-        pub age_score: u32,
-        pub claims_history_score: u32,
-        pub market_conditions_score: u32,
-        pub overall_score: u32,
-    }
-
-    /// Historical claim data for risk analysis
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct HistoricalClaimData {
-        pub property_id: u64,
-        pub total_claims: u32,
-        pub total_claim_amount: u128,
-        pub claim_frequency: u32,
-        pub average_claim_size: u128,
-        pub last_claim_timestamp: u64,
-    }
-
-    /// Market conditions data for premium adjustment
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct MarketConditions {
-        pub market_risk_index: u32,
-        pub regional_risk_index: u32,
-        pub catastrophe_risk_index: u32,
-        pub economic_factor: u32,
-        pub supply_demand_factor: u32,
-        pub last_updated: u64,
-    }
-
-    /// Location-based risk factors
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct LocationRiskFactor {
-        pub location_code: String,
-        pub flood_risk: u32,
-        pub earthquake_risk: u32,
-        pub fire_risk: u32,
-        pub crime_risk: u32,
-        pub overall_risk_score: u32,
-        pub premium_adjustment: u32,
-    }
-
-    /// Property type risk factors
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct PropertyTypeRisk {
-        pub property_type: String,
-        pub base_risk_score: u32,
-        pub recommended_premium_rate: u32,
-    }
-
-    /// Premium oracle data for external market integration
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct PremiumOracleData {
-        pub source: String,
-        pub market_premium_index: u128,
-        pub regional_index: u128,
-        pub catastrophe_index: u128,
-        pub confidence: u32,
-        pub timestamp: u64,
-    }
-
-    /// Backtest result for validating premium calculations
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct BacktestResult {
-        pub test_period_start: u64,
-        pub test_period_end: u64,
-        pub predicted_premiums: u128,
-        pub actual_claims: u128,
-        pub accuracy_ratio: u32,
-        pub loss_ratio: u32,
-        pub sample_size: u32,
-    }
-
-    /// Premium calculation parameters
-    #[derive(
-        Debug,
-        Clone,
-        PartialEq,
-        scale::Encode,
-        scale::Decode,
-        ink::storage::traits::StorageLayout,
-    )]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct PremiumParams {
-        pub property_id: u64,
-        pub coverage_amount: u128,
-        pub coverage_type: CoverageType,
-        pub location: String,
-        pub property_type: String,
-        pub property_age: u32,
-        pub coverage_duration_days: u32,
-        pub requested_deductible: u128,
     }
 
     #[derive(
@@ -537,6 +320,29 @@ mod propchain_insurance {
         pub min_risk_score: u32,
     }
 
+    /// Result of a single batch claim operation
+    #[derive(
+        Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
+    )]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub struct BatchClaimResult {
+        pub claim_id: u64,
+        pub success: bool,
+        pub error: Option<InsuranceError>,
+    }
+
+    /// Summary of batch claim processing
+    #[derive(
+        Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
+    )]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub struct BatchClaimSummary {
+        pub total_processed: u64,
+        pub successful: u64,
+        pub failed: u64,
+        pub results: Vec<BatchClaimResult>,
+    }
+
     #[derive(
         Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
     )]
@@ -569,26 +375,12 @@ mod propchain_insurance {
         claim_count: u64,
         policy_claims: Mapping<u64, Vec<u64>>,
 
-        // Evidence Storage
-        evidence_items: Mapping<u64, EvidenceItem>,      // evidence_id -> EvidenceItem
-        claim_evidence: Mapping<u64, Vec<u64>>,          // claim_id -> Vec<evidence_ids>
-        evidence_verifications: Mapping<u64, Vec<EvidenceVerification>>, // evidence_id -> verifications
-        evidence_count: u64,
-
         // Risk Pools
         pools: Mapping<u64, RiskPool>,
         pool_count: u64,
 
         // Risk Assessments
         risk_assessments: Mapping<u64, RiskAssessment>,
-
-        // Dynamic Premium Calculation
-        historical_claim_data: Mapping<u64, HistoricalClaimData>,
-        location_risk_factors: Mapping<String, LocationRiskFactor>,
-        property_type_risks: Mapping<String, PropertyTypeRisk>,
-        market_conditions: Mapping<String, MarketConditions>,
-        premium_oracle_data: Mapping<String, PremiumOracleData>,
-        last_premium_update: Mapping<u64, u64>,
 
         // Reinsurance
         reinsurance_agreements: Mapping<u64, ReinsuranceAgreement>,
@@ -619,6 +411,12 @@ mod propchain_insurance {
         // Claim cooldown: property_id -> last_claim_timestamp
         claim_cooldowns: Mapping<u64, u64>,
 
+        // Evidence tracking
+        evidence_count: u64,
+        evidence_items: Mapping<u64, EvidenceItem>,
+        claim_evidence: Mapping<u64, Vec<u64>>,
+        evidence_verifications: Mapping<u64, Vec<EvidenceVerification>>,
+
         // Oracle contract for parametric claims
         oracle_contract: Option<AccountId>,
 
@@ -626,10 +424,6 @@ mod propchain_insurance {
         platform_fee_rate: u32,     // Basis points (e.g. 200 = 2%)
         claim_cooldown_period: u64, // In seconds
         min_pool_capital: u128,
-
-        // Policy expiration tracking
-        active_policy_indexes: Vec<u64>, // Ordered list of active policy IDs
-        last_expiration_check_index: u64, // Index in active_policy_indexes for pagination
     }
 
     // =========================================================================
@@ -816,29 +610,9 @@ mod propchain_insurance {
     pub struct EvidenceVerified {
         #[ink(topic)]
         evidence_id: u64,
-        #[ink(topic)]
         verified_by: AccountId,
         is_valid: bool,
         verified_at: u64,
-    }
-
-    #[ink(event)]
-    pub struct PolicyExpired {
-        #[ink(topic)]
-        policy_id: u64,
-        #[ink(topic)]
-        policyholder: AccountId,
-        expired_at: u64,
-        end_time: u64,
-    }
-
-    #[ink(event)]
-    pub struct PoliciesExpirationChecked {
-        #[ink(topic)]
-        checked_count: u64,
-        expired_count: u64,
-        next_start_index: u64,
-        timestamp: u64,
     }
 
     // =========================================================================
@@ -857,19 +631,9 @@ mod propchain_insurance {
                 claims: Mapping::default(),
                 claim_count: 0,
                 policy_claims: Mapping::default(),
-                evidence_items: Mapping::default(),
-                claim_evidence: Mapping::default(),
-                evidence_verifications: Mapping::default(),
-                evidence_count: 0,
                 pools: Mapping::default(),
                 pool_count: 0,
                 risk_assessments: Mapping::default(),
-                historical_claim_data: Mapping::default(),
-                location_risk_factors: Mapping::default(),
-                property_type_risks: Mapping::default(),
-                market_conditions: Mapping::default(),
-                premium_oracle_data: Mapping::default(),
-                last_premium_update: Mapping::default(),
                 reinsurance_agreements: Mapping::default(),
                 reinsurance_count: 0,
                 insurance_tokens: Mapping::default(),
@@ -883,12 +647,14 @@ mod propchain_insurance {
                 authorized_oracles: Mapping::default(),
                 authorized_assessors: Mapping::default(),
                 claim_cooldowns: Mapping::default(),
+                evidence_count: 0,
+                evidence_items: Mapping::default(),
+                claim_evidence: Mapping::default(),
+                evidence_verifications: Mapping::default(),
                 platform_fee_rate: 200,            // 2%
                 claim_cooldown_period: 2_592_000,  // 30 days in seconds
                 min_pool_capital: 100_000_000_000, // Minimum pool capital
                 oracle_contract: None,
-                active_policy_indexes: Vec::new(),
-                last_expiration_check_index: 0,
             }
         }
 
@@ -1291,555 +1057,6 @@ mod propchain_insurance {
             })
         }
 
-        /// Calculate dynamic premium based on historical data and market conditions
-        #[ink(message)]
-        pub fn calculate_dynamic_premium(
-            &self,
-            params: PremiumParams,
-        ) -> Result<DynamicPremium, InsuranceError> {
-            let now = self.env().block_timestamp();
-            
-            // Get risk assessment
-            let assessment = self.risk_assessments
-                .get(&params.property_id)
-                .ok_or(InsuranceError::PropertyNotInsurable)?;
-
-            // Get historical claim data
-            let claim_data = self.historical_claim_data
-                .get(&params.property_id)
-                .unwrap_or(HistoricalClaimData {
-                    property_id: params.property_id,
-                    total_claims: 0,
-                    total_claim_amount: 0,
-                    claim_frequency: 0,
-                    average_claim_size: 0,
-                    last_claim_timestamp: 0,
-                });
-
-            // Get location risk factor
-            let location_factor = self.location_risk_factors
-                .get(&params.location)
-                .map(|l| l.overall_risk_score)
-                .unwrap_or(50); // Default neutral risk
-
-            // Get property type risk
-            let property_type_factor = self.property_type_risks
-                .get(&params.property_type)
-                .map(|p| p.base_risk_score)
-                .unwrap_or(50); // Default neutral risk
-
-            // Get market conditions
-            let market_conditions = self.market_conditions
-                .get(&params.location)
-                .unwrap_or(MarketConditions {
-                    market_risk_index: 50,
-                    regional_risk_index: 50,
-                    catastrophe_risk_index: 50,
-                    economic_factor: 50,
-                    supply_demand_factor: 50,
-                    last_updated: now,
-                });
-
-            // Get premium oracle data
-            let oracle_data = self.premium_oracle_data
-                .get(&params.location)
-                .unwrap_or(PremiumOracleData {
-                    source: String::from("internal"),
-                    market_premium_index: 10000, // 100% baseline
-                    regional_index: 10000,
-                    catastrophe_index: 10000,
-                    confidence: 50,
-                    timestamp: now,
-                });
-
-            // Calculate risk score components
-            let risk_components = self.calculate_risk_components(
-                assessment.clone(),
-                claim_data,
-                location_factor,
-                property_type_factor,
-                market_conditions.clone(),
-            );
-
-            // Calculate base premium
-            let base_premium = self.calculate_base_premium(
-                params.coverage_amount,
-                params.coverage_type,
-                params.coverage_duration_days,
-            );
-
-            // Apply risk adjustment
-            let risk_adjusted_premium = self.apply_risk_adjustment(
-                base_premium,
-                risk_components.overall_score,
-            );
-
-            // Apply market adjustment
-            let market_adjusted_premium = self.apply_market_adjustment(
-                risk_adjusted_premium,
-                market_conditions,
-                oracle_data,
-            );
-
-            // Apply location factor
-            let location_premium_adjustment = self.location_risk_factors
-                .get(&params.location)
-                .map(|l| l.premium_adjustment)
-                .unwrap_or(0);
-
-            let final_premium = market_adjusted_premium
-                .saturating_add(
-                    market_adjusted_premium.saturating_mul(location_premium_adjustment as u128) / 10000
-                );
-
-            // Calculate confidence score based on data availability
-            let confidence_score = self.calculate_confidence_score(
-                &assessment,
-                &claim_data,
-                &oracle_data,
-            );
-
-            Ok(DynamicPremium {
-                base_premium,
-                risk_adjusted_premium,
-                market_adjusted_premium,
-                location_factor,
-                property_type_factor,
-                coverage_factor: Self::coverage_type_multiplier(&params.coverage_type),
-                historical_claims_factor: Self::claims_frequency_to_factor(claim_data.claim_frequency),
-                market_condition_factor: market_conditions.market_risk_index,
-                final_premium,
-                confidence_score,
-                calculation_timestamp: now,
-                valid_until: now + 86400, // 24 hours validity
-            })
-        }
-
-        /// Calculate risk score components from various factors
-        fn calculate_risk_components(
-            &self,
-            assessment: RiskAssessment,
-            claim_data: HistoricalClaimData,
-            location_factor: u32,
-            property_type_factor: u32,
-            market_conditions: MarketConditions,
-        ) -> RiskScoreComponents {
-            // Location score (inverted: lower risk = higher score)
-            let location_score = 100.saturating_sub(location_factor);
-
-            // Property type score
-            let property_type_score = 100.saturating_sub(property_type_factor);
-
-            // Construction score from assessment
-            let construction_score = 100.saturating_sub(assessment.construction_risk_score);
-
-            // Age score from assessment
-            let age_score = 100.saturating_sub(assessment.age_risk_score);
-
-            // Claims history score (inverted: more claims = lower score)
-            let claims_history_score = Self::claims_frequency_to_score(claim_data.claim_frequency);
-
-            // Market conditions score
-            let market_conditions_score = 100.saturating_sub(market_conditions.market_risk_index);
-
-            // Calculate overall weighted score
-            // Weights: location 20%, property_type 15%, construction 15%, age 10%, claims 25%, market 15%
-            let overall_score = (
-                (location_score as u64 * 20) +
-                (property_type_score as u64 * 15) +
-                (construction_score as u64 * 15) +
-                (age_score as u64 * 10) +
-                (claims_history_score as u64 * 25) +
-                (market_conditions_score as u64 * 15)
-            ) / 100 as u64) as u32;
-
-            RiskScoreComponents {
-                location_score,
-                property_type_score,
-                construction_score,
-                age_score,
-                claims_history_score,
-                market_conditions_score,
-                overall_score,
-            }
-        }
-
-        /// Convert claims frequency to factor (0-200 scale for multiplier)
-        fn claims_frequency_to_factor(frequency: u32) -> u32 {
-            match frequency {
-                0 => 80,      // No claims - discount
-                1..=10 => 100, // Low frequency - baseline
-                11..=30 => 130, // Medium frequency
-                31..=50 => 160, // High frequency
-                _ => 200,      // Very high frequency
-            }
-        }
-
-        /// Convert claims frequency to score (0-100)
-        fn claims_frequency_to_score(frequency: u32) -> u32 {
-            match frequency {
-                0 => 90,
-                1..=10 => 70,
-                11..=30 => 50,
-                31..=50 => 30,
-                _ => 10,
-            }
-        }
-
-        /// Calculate base premium from coverage amount and type
-        fn calculate_base_premium(
-            &self,
-            coverage_amount: u128,
-            coverage_type: CoverageType,
-            duration_days: u32,
-        ) -> u128 {
-            // Base rate: 150 basis points (1.5%)
-            let base_rate: u128 = 150;
-            
-            // Coverage type multiplier
-            let coverage_mult = Self::coverage_type_multiplier(&coverage_type) as u128;
-            
-            // Duration adjustment (annualized)
-            let duration_factor = if duration_days >= 365 {
-                100
-            } else {
-                (duration_days as u128 * 100) / 365
-            };
-            
-            // Calculate annual premium
-            coverage_amount
-                .saturating_mul(base_rate)
-                .saturating_mul(coverage_mult)
-                .saturating_mul(duration_factor)
-                / 1_000_000_000_000u128 // 100 * 10000 * 100 for basis points
-        }
-
-        /// Apply risk adjustment to base premium
-        fn apply_risk_adjustment(&self, base_premium: u128, risk_score: u32) -> u128 {
-            let risk_multiplier = self.risk_score_to_multiplier(risk_score);
-            base_premium.saturating_mul(risk_multiplier as u128) / 100
-        }
-
-        /// Apply market conditions and oracle adjustment
-        fn apply_market_adjustment(
-            &self,
-            premium: u128,
-            market_conditions: MarketConditions,
-            oracle_data: PremiumOracleData,
-        ) -> u128 {
-            // Market risk adjustment (0-200%)
-            let market_factor = 100 + (market_conditions.market_risk_index as i32 - 50) as u32;
-            
-            // Regional risk adjustment
-            let regional_factor = 100 + (market_conditions.regional_risk_index as i32 - 50) as u32;
-            
-            // Catastrophe risk adjustment
-            let catastrophe_factor = 100 + (market_conditions.catastrophe_risk_index as i32 - 50) as u32;
-            
-            // Oracle market index adjustment (10000 = 100%)
-            let oracle_factor = oracle_data.market_premium_index / 100;
-            
-            // Combine all factors
-            let total_factor = market_factor
-                .saturating_mul(regional_factor)
-                .saturating_mul(catastrophe_factor)
-                .saturating_mul(oracle_factor as u32)
-                / 1_000_000; // Normalize
-
-            premium.saturating_mul(total_factor) / 100
-        }
-
-        /// Calculate confidence score based on data availability
-        fn calculate_confidence_score(
-            &self,
-            assessment: &RiskAssessment,
-            claim_data: &HistoricalClaimData,
-            oracle_data: &PremiumOracleData,
-        ) -> u32 {
-            let mut score: u32 = 0;
-
-            // Risk assessment availability (40% weight)
-            if assessment.assessed_at > 0 {
-                score += 40;
-            }
-
-            // Historical claims data (30% weight)
-            if claim_data.total_claims > 0 {
-                score += 30;
-            }
-
-            // Oracle data quality (30% weight)
-            score += oracle_data.confidence * 3 / 10; // Scale to max 30
-
-            score.min(100)
-        }
-
-        /// Update historical claim data for a property
-        #[ink(message)]
-        pub fn update_claim_history(
-            &mut self,
-            property_id: u64,
-            claim_amount: u128,
-            coverage_type: CoverageType,
-        ) -> Result<(), InsuranceError> {
-            let mut claim_data = self.historical_claim_data
-                .get(&property_id)
-                .unwrap_or(HistoricalClaimData {
-                    property_id,
-                    total_claims: 0,
-                    total_claim_amount: 0,
-                    claim_frequency: 0,
-                    average_claim_size: 0,
-                    last_claim_timestamp: 0,
-                });
-
-            let now = self.env().block_timestamp();
-            
-            // Update claim statistics
-            claim_data.total_claims += 1;
-            claim_data.total_claim_amount += claim_amount;
-            claim_data.last_claim_timestamp = now;
-            
-            // Calculate average claim size
-            claim_data.average_claim_size = claim_data.total_claim_amount / claim_data.total_claims as u128;
-            
-            // Estimate annual claim frequency (claims per 1000 policies)
-            // For simplicity, we use a baseline of 1000 policies
-            claim_data.claim_frequency = (claim_data.total_claims * 1000) as u32;
-
-            self.historical_claim_data.insert(&property_id, &claim_data);
-            
-            Ok(())
-        }
-
-        /// Set location risk factor (admin only)
-        #[ink(message)]
-        pub fn set_location_risk_factor(
-            &mut self,
-            location_code: String,
-            flood_risk: u32,
-            earthquake_risk: u32,
-            fire_risk: u32,
-            crime_risk: u32,
-            premium_adjustment: u32,
-        ) -> Result<(), InsuranceError> {
-            // Calculate overall risk score (weighted average)
-            let overall_risk_score = (
-                (flood_risk as u64 * 25) +
-                (earthquake_risk as u64 * 25) +
-                (fire_risk as u64 * 25) +
-                (crime_risk as u64 * 25)
-            ) as u32;
-
-            let risk_factor = LocationRiskFactor {
-                location_code: location_code.clone(),
-                flood_risk,
-                earthquake_risk,
-                fire_risk,
-                crime_risk,
-                overall_risk_score,
-                premium_adjustment,
-            };
-
-            self.location_risk_factors.insert(&location_code, &risk_factor);
-            Ok(())
-        }
-
-        /// Set property type risk factor (admin only)
-        #[ink(message)]
-        pub fn set_property_type_risk(
-            &mut self,
-            property_type: String,
-            base_risk_score: u32,
-            recommended_premium_rate: u32,
-        ) -> Result<(), InsuranceError> {
-            let risk = PropertyTypeRisk {
-                property_type: property_type.clone(),
-                base_risk_score,
-                recommended_premium_rate,
-            };
-
-            self.property_type_risks.insert(&property_type, &risk);
-            Ok(())
-        }
-
-        /// Update market conditions (admin only)
-        #[ink(message)]
-        pub fn update_market_conditions(
-            &mut self,
-            location: String,
-            market_risk_index: u32,
-            regional_risk_index: u32,
-            catastrophe_risk_index: u32,
-            economic_factor: u32,
-            supply_demand_factor: u32,
-        ) -> Result<(), InsuranceError> {
-            let conditions = MarketConditions {
-                market_risk_index,
-                regional_risk_index,
-                catastrophe_risk_index,
-                economic_factor,
-                supply_demand_factor,
-                last_updated: self.env().block_timestamp(),
-            };
-
-            self.market_conditions.insert(&location, &conditions);
-            Ok(())
-        }
-
-        /// Update premium oracle data (admin only)
-        #[ink(message)]
-        pub fn update_premium_oracle(
-            &mut self,
-            location: String,
-            source: String,
-            market_premium_index: u128,
-            regional_index: u128,
-            catastrophe_index: u128,
-            confidence: u32,
-        ) -> Result<(), InsuranceError> {
-            let oracle_data = PremiumOracleData {
-                source,
-                market_premium_index,
-                regional_index,
-                catastrophe_index,
-                confidence,
-                timestamp: self.env().block_timestamp(),
-            };
-
-            self.premium_oracle_data.insert(&location, &oracle_data);
-            Ok(())
-        }
-
-        /// Run backtest on historical data to validate premium calculations
-        #[ink(message)]
-        pub fn backtest_premium_calculation(
-            &self,
-            start_timestamp: u64,
-            end_timestamp: u64,
-        ) -> Result<BacktestResult, InsuranceError> {
-            let mut predicted_premiums: u128 = 0;
-            let mut actual_claims: u128 = 0;
-            let mut sample_count: u32 = 0;
-
-            // Iterate through all policies in the period
-            for (policy_id, policy) in self.policies.iter() {
-                if policy.start_time >= start_timestamp && policy.start_time <= end_timestamp {
-                    // Get calculated premium
-                    if let Ok(calc) = self.calculate_premium(
-                        policy.property_id,
-                        policy.coverage_amount,
-                        policy.coverage_type.clone(),
-                    ) {
-                        predicted_premiums += calc.annual_premium;
-                    }
-
-                    // Get actual claims in period
-                    if let Some(claim_ids) = self.policy_claims.get(&policy_id) {
-                        for claim_id in claim_ids.iter() {
-                            if let Some(claim) = self.claims.get(claim_id) {
-                                if claim.submitted_at >= start_timestamp 
-                                    && claim.submitted_at <= end_timestamp 
-                                    && claim.status == ClaimStatus::Paid {
-                                    actual_claims += claim.payout_amount;
-                                }
-                            }
-                        }
-                    }
-
-                    sample_count += 1;
-                }
-            }
-
-            // Calculate accuracy metrics
-            let accuracy_ratio = if predicted_premiums > 0 {
-                ((actual_claims as u64 * 10000) / predicted_premiums as u64) as u32
-            } else {
-                100 // Perfect if no predictions
-            };
-
-            let loss_ratio = if predicted_premiums > 0 {
-                ((actual_claims as u64 * 10000) / predicted_premiums as u64) as u32
-            } else {
-                0
-            };
-
-            Ok(BacktestResult {
-                test_period_start: start_timestamp,
-                test_period_end: end_timestamp,
-                predicted_premiums,
-                actual_claims,
-                accuracy_ratio,
-                loss_ratio,
-                sample_size: sample_count,
-            })
-        }
-
-        /// Get dynamic premium for a property
-        #[ink(message)]
-        pub fn get_dynamic_premium(
-            &self,
-            property_id: u64,
-        ) -> Result<DynamicPremium, InsuranceError> {
-            // Get last update timestamp
-            let last_update = self.last_premium_update
-                .get(&property_id)
-                .unwrap_or(0);
-            
-            let now = self.env().block_timestamp();
-            
-            // Check if we need to recalculate (expired or never calculated)
-            if last_update == 0 || now > last_update + 86400 {
-                return Err(InsuranceError::PropertyNotInsurable);
-            }
-
-            // Get policy to reconstruct params
-            // For now, return error - in production would cache the premium
-            Err(InsuranceError::PropertyNotInsurable)
-        }
-
-        /// Initialize default location risk factors
-        #[ink(message)]
-        pub fn init_default_location_risks(&mut self) -> Result<(), InsuranceError> {
-            // Set default US locations
-            let default_locations = vec![
-                ("CA", 80, 70, 60, 30, 150),   // California - high earthquake/fire
-                ("FL", 90, 20, 40, 40, 180),   // Florida - high flood/hurricane
-                ("TX", 60, 30, 50, 50, 120),   // Texas - moderate risk
-                ("NY", 40, 30, 40, 60, 100),   // New York - moderate
-                ("WA", 50, 60, 50, 30, 110),  // Washington - earthquake
-            ];
-
-            for (loc, flood, eq, fire, crime, adj) in default_locations {
-                self.set_location_risk_factor(
-                    String::from(loc),
-                    flood,
-                    eq,
-                    fire,
-                    crime,
-                    adj,
-                )?;
-            }
-
-            // Set default property types
-            let default_types = vec![
-                ("Residential", 30, 150),
-                ("Commercial", 40, 180),
-                ("Industrial", 50, 200),
-                ("MultiFamily", 35, 160),
-            ];
-
-            for (pt, risk, rate) in default_types {
-                self.set_property_type_risk(
-                    String::from(pt),
-                    risk,
-                    rate,
-                )?;
-            }
-
-            Ok(())
-        }
-
         // =====================================================================
         // POLICY MANAGEMENT
         // =====================================================================
@@ -1940,9 +1157,6 @@ mod propchain_insurance {
             prop_policies.push(policy_id);
             self.property_policies.insert(&property_id, &prop_policies);
 
-            // Add to active policy indexes for expiration tracking
-            self.active_policy_indexes.push(policy_id);
-
             // Mint insurance token
             self.internal_mint_token(policy_id, caller, coverage_amount)?;
 
@@ -2027,204 +1241,6 @@ mod propchain_insurance {
         }
 
         // =====================================================================
-        // AUTOMATED POLICY EXPIRATION CHECKER
-        // =====================================================================
-
-        /// Check and expire policies automatically. Callable by anyone.
-        /// Uses pagination to avoid gas limits - processes up to `batch_size` policies per call.
-        /// Returns the number of policies expired in this batch.
-        #[ink(message)]
-        pub fn check_and_expire_policies(
-            &mut self,
-            batch_size: u64,
-        ) -> Result<u64, InsuranceError> {
-            let now = self.env().block_timestamp();
-            let mut expired_count = 0u64;
-            let mut checked_count = 0u64;
-            let start_index = self.last_expiration_check_index;
-            let mut policies_to_remove = Vec::new();
-
-            // Process batch of policies starting from last checked index
-            for i in start_index..self.active_policy_indexes.len() {
-                if checked_count >= batch_size {
-                    break; // Gas limit protection
-                }
-
-                let policy_id = self.active_policy_indexes.get(i).unwrap_or(0);
-                if policy_id == 0 {
-                    continue; // Skip empty slots
-                }
-
-                if let Some(mut policy) = self.policies.get(&policy_id) {
-                    checked_count += 1;
-
-                    // Check if policy has expired
-                    if policy.status == PolicyStatus::Active && now > policy.end_time {
-                        // Mark as expired
-                        policy.status = PolicyStatus::Expired;
-                        self.policies.insert(&policy_id, &policy);
-
-                        // Emit expiration event
-                        self.env().emit_event(PolicyExpired {
-                            policy_id,
-                            policyholder: policy.policyholder,
-                            expired_at: now,
-                            end_time: policy.end_time,
-                        });
-
-                        expired_count += 1;
-
-                        // Mark for removal from active indexes
-                        policies_to_remove.push(i);
-                    }
-                }
-            }
-
-            // Remove expired policies from active indexes (in reverse order to maintain indices)
-            for &index in policies_to_remove.iter().rev() {
-                self.active_policy_indexes.remove(index);
-            }
-
-            // Update last checked index for pagination
-            let next_start_index = if checked_count < batch_size {
-                0 // Reset if we processed all remaining policies
-            } else {
-                start_index + checked_count
-            };
-            self.last_expiration_check_index = next_start_index;
-
-            // Emit summary event
-            self.env().emit_event(PoliciesExpirationChecked {
-                checked_count,
-                expired_count,
-                next_start_index,
-                timestamp: now,
-            });
-
-            Ok(expired_count)
-        }
-
-        /// Get all active policy IDs with pagination support
-        #[ink(message)]
-        pub fn get_active_policies(
-            &self,
-            start_index: u64,
-            limit: u64,
-        ) -> Vec<u64> {
-            let mut result = Vec::new();
-            let end_index = start_index.saturating_add(limit);
-
-            for i in start_index..end_index.min(self.active_policy_indexes.len()) {
-                let policy_id = self.active_policy_indexes.get(i).unwrap_or(0);
-                if policy_id != 0 {
-                    if let Some(policy) = self.policies.get(&policy_id) {
-                        if policy.status == PolicyStatus::Active {
-                            result.push(policy_id);
-                        }
-                    }
-                }
-            }
-
-            result
-        }
-
-        /// Get count of active policies
-        #[ink(message)]
-        pub fn get_active_policies_count(&self) -> u64 {
-            self.active_policy_indexes.len() as u64
-        }
-
-        /// Get policies that will expire within the next `seconds_from_now` seconds
-        #[ink(message)]
-        pub fn get_expiring_soon_policies(
-            &self,
-            seconds_from_now: u64,
-            start_index: u64,
-            limit: u64,
-        ) -> Vec<u64> {
-            let now = self.env().block_timestamp();
-            let expiry_threshold = now.saturating_add(seconds_from_now);
-            let mut expiring_policies = Vec::new();
-            let end_index = start_index.saturating_add(limit);
-
-            for i in start_index..end_index.min(self.active_policy_indexes.len()) {
-                let policy_id = self.active_policy_indexes.get(i).unwrap_or(0);
-                if policy_id != 0 {
-                    if let Some(policy) = self.policies.get(&policy_id) {
-                        if policy.status == PolicyStatus::Active 
-                            && policy.end_time <= expiry_threshold 
-                            && policy.end_time > now {
-                            expiring_policies.push(policy_id);
-                        }
-                    }
-                }
-            }
-
-            expiring_policies
-        }
-
-        /// Get detailed information about a specific policy's expiration status
-        #[ink(message)]
-        pub fn get_policy_expiration_info(
-            &self,
-            policy_id: u64,
-        ) -> Option<(u64, u64, u64, bool)> {
-            // Returns (start_time, end_time, time_remaining, is_expired)
-            if let Some(policy) = self.policies.get(&policy_id) {
-                let now = self.env().block_timestamp();
-                let is_expired = policy.status == PolicyStatus::Expired || now > policy.end_time;
-                let time_remaining = if is_expired {
-                    0
-                } else {
-                    policy.end_time.saturating_sub(now)
-                };
-                Some((policy.start_time, policy.end_time, time_remaining, is_expired))
-            } else {
-                None
-            }
-        }
-
-        /// Manually expire a specific policy (admin only)
-        #[ink(message)]
-        pub fn manually_expire_policy(
-            &mut self,
-            policy_id: u64,
-        ) -> Result<(), InsuranceError> {
-            let caller = self.env().caller();
-            
-            if caller != self.admin {
-                return Err(InsuranceError::Unauthorized);
-            }
-
-            let mut policy = self
-                .policies
-                .get(&policy_id)
-                .ok_or(InsuranceError::PolicyNotFound)?;
-
-            if policy.status != PolicyStatus::Active {
-                return Err(InsuranceError::PolicyInactive);
-            }
-
-            let now = self.env().block_timestamp();
-            policy.status = PolicyStatus::Expired;
-            self.policies.insert(&policy_id, &policy);
-
-            // Remove from active indexes if present
-            if let Some(index) = self.active_policy_indexes.iter().position(|&id| id == policy_id) {
-                self.active_policy_indexes.remove(index);
-            }
-
-            self.env().emit_event(PolicyExpired {
-                policy_id,
-                policyholder: policy.policyholder,
-                expired_at: now,
-                end_time: policy.end_time,
-            });
-
-            Ok(())
-        }
-
-        // =====================================================================
         // CLAIMS PROCESSING
         // =====================================================================
 
@@ -2287,8 +1303,7 @@ mod propchain_insurance {
                 claimant: caller,
                 claim_amount,
                 description,
-                primary_evidence: evidence.clone(),  // Store original evidence
-                evidence_ids: Vec::new(),            // Initialize empty, can add more later
+                evidence,
                 oracle_report_url: String::new(),
                 status: ClaimStatus::Pending,
                 submitted_at: now,
@@ -2438,6 +1453,206 @@ mod propchain_insurance {
         }
 
         // =====================================================================
+        // BATCH CLAIM OPERATIONS
+        // =====================================================================
+
+        /// Batch approve multiple claims in a single transaction
+        /// Returns summary with individual results for partial failure handling
+        #[ink(message)]
+        pub fn batch_approve_claims(
+            &mut self,
+            claim_ids: Vec<u64>,
+            oracle_report_url: String,
+        ) -> Result<BatchClaimSummary, InsuranceError> {
+            let caller = self.env().caller();
+
+            if caller != self.admin && !self.authorized_assessors.get(&caller).unwrap_or(false) {
+                return Err(InsuranceError::Unauthorized);
+            }
+
+            let mut results: Vec<BatchClaimResult> = Vec::new();
+            let mut successful = 0u64;
+            let mut failed = 0u64;
+
+            for claim_id in claim_ids.iter() {
+                let result = self.process_single_claim(
+                    claim_id,
+                    true,
+                    oracle_report_url.clone(),
+                    String::new(),
+                    caller,
+                );
+
+                match &result {
+                    BatchClaimResult { success: true, .. } => {
+                        successful += 1;
+                    }
+                    BatchClaimResult { success: false, .. } => {
+                        failed += 1;
+                    }
+                }
+
+                results.push(result);
+            }
+
+            let summary = BatchClaimSummary {
+                total_processed: (successful + failed),
+                successful,
+                failed,
+                results,
+            };
+
+            Ok(summary)
+        }
+
+        /// Batch reject multiple claims in a single transaction
+        /// Returns summary with individual results for partial failure handling
+        #[ink(message)]
+        pub fn batch_reject_claims(
+            &mut self,
+            claim_ids: Vec<u64>,
+            rejection_reason: String,
+        ) -> Result<BatchClaimSummary, InsuranceError> {
+            let caller = self.env().caller();
+
+            if caller != self.admin && !self.authorized_assessors.get(&caller).unwrap_or(false) {
+                return Err(InsuranceError::Unauthorized);
+            }
+
+            let mut results: Vec<BatchClaimResult> = Vec::new();
+            let mut successful = 0u64;
+            let mut failed = 0u64;
+
+            for claim_id in claim_ids.iter() {
+                let result = self.process_single_claim(
+                    claim_id,
+                    false,
+                    String::new(),
+                    rejection_reason.clone(),
+                    caller,
+                );
+
+                match &result {
+                    BatchClaimResult { success: true, .. } => {
+                        successful += 1;
+                    }
+                    BatchClaimResult { success: false, .. } => {
+                        failed += 1;
+                    }
+                }
+
+                results.push(result);
+            }
+
+            let summary = BatchClaimSummary {
+                total_processed: (successful + failed),
+                successful,
+                failed,
+                results,
+            };
+
+            Ok(summary)
+        }
+
+        /// Internal helper to process a single claim within a batch
+        /// Returns result without failing the entire batch
+        fn process_single_claim(
+            &mut self,
+            claim_id: u64,
+            approved: bool,
+            oracle_report_url: String,
+            rejection_reason: String,
+            caller: AccountId,
+        ) -> BatchClaimResult {
+            // Try to process the claim
+            match self.process_claim_inner(
+                claim_id,
+                approved,
+                oracle_report_url,
+                rejection_reason,
+                caller,
+            ) {
+                Ok(()) => BatchClaimResult {
+                    claim_id,
+                    success: true,
+                    error: None,
+                },
+                Err(error) => BatchClaimResult {
+                    claim_id,
+                    success: false,
+                    error: Some(error),
+                },
+            }
+        }
+
+        /// Inner claim processing logic (extracted from process_claim)
+        fn process_claim_inner(
+            &mut self,
+            claim_id: u64,
+            approved: bool,
+            oracle_report_url: String,
+            rejection_reason: String,
+            caller: AccountId,
+        ) -> Result<(), InsuranceError> {
+            let mut claim = self
+                .claims
+                .get(&claim_id)
+                .ok_or(InsuranceError::ClaimNotFound)?;
+
+            if claim.status != ClaimStatus::Pending && claim.status != ClaimStatus::UnderReview {
+                return Err(InsuranceError::ClaimAlreadyProcessed);
+            }
+
+            let now = self.env().block_timestamp();
+            claim.assessor = Some(caller);
+            claim.oracle_report_url = oracle_report_url;
+            claim.processed_at = Some(now);
+
+            if approved {
+                let policy = self
+                    .policies
+                    .get(&claim.policy_id)
+                    .ok_or(InsuranceError::PolicyNotFound)?;
+
+                // Apply deductible
+                let payout = if claim.claim_amount > policy.deductible {
+                    claim.claim_amount.saturating_sub(policy.deductible)
+                } else {
+                    0
+                };
+
+                claim.payout_amount = payout;
+                claim.status = ClaimStatus::Approved;
+                self.claims.insert(&claim_id, &claim);
+
+                // Execute payout
+                self.execute_payout(claim_id, claim.policy_id, claim.claimant, payout)?;
+
+                self.env().emit_event(ClaimApproved {
+                    claim_id,
+                    policy_id: claim.policy_id,
+                    payout_amount: payout,
+                    approved_by: caller,
+                    timestamp: now,
+                });
+            } else {
+                claim.status = ClaimStatus::Rejected;
+                claim.rejection_reason = rejection_reason.clone();
+                self.claims.insert(&claim_id, &claim);
+
+                self.env().emit_event(ClaimRejected {
+                    claim_id,
+                    policy_id: claim.policy_id,
+                    reason: rejection_reason,
+                    rejected_by: caller,
+                    timestamp: now,
+                });
+            }
+
+            Ok(())
+        }
+
+        // =====================================================================
         // CLAIMS EVIDENCE VERIFICATION SYSTEM
         // =====================================================================
 
@@ -2478,10 +1693,9 @@ mod propchain_insurance {
                 .ok_or(InsuranceError::ClaimNotFound)?;
 
             // Verify caller is authorized (claimant, assessor, or admin)
-            let is_authorized = caller == claim.claimant 
-                || claim.assessor == Some(caller) 
-                || caller == self.admin;
-            
+            let is_authorized =
+                caller == claim.claimant || claim.assessor == Some(caller) || caller == self.admin;
+
             if !is_authorized {
                 return Err(InsuranceError::Unauthorized);
             }
@@ -2559,7 +1773,10 @@ mod propchain_insurance {
                 .ok_or(InsuranceError::ClaimNotFound)?;
 
             // Prevent duplicate verification by same verifier
-            let verifications = self.evidence_verifications.get(&evidence_id).unwrap_or_default();
+            let verifications = self
+                .evidence_verifications
+                .get(&evidence_id)
+                .unwrap_or_default();
             for verification in &verifications {
                 if verification.verifier == caller {
                     return Err(InsuranceError::DuplicateClaim); // Reusing error for duplicate verification
@@ -2591,9 +1808,13 @@ mod propchain_insurance {
             };
 
             // Store verification
-            let mut verifications = self.evidence_verifications.get(&evidence_id).unwrap_or_default();
+            let mut verifications = self
+                .evidence_verifications
+                .get(&evidence_id)
+                .unwrap_or_default();
             verifications.push(verification);
-            self.evidence_verifications.insert(&evidence_id, &verifications);
+            self.evidence_verifications
+                .insert(&evidence_id, &verifications);
 
             // Emit event
             self.env().emit_event(EvidenceVerified {
@@ -2630,13 +1851,18 @@ mod propchain_insurance {
         /// Get all verifications for an evidence item
         #[ink(message)]
         pub fn get_evidence_verifications(&self, evidence_id: u64) -> Vec<EvidenceVerification> {
-            self.evidence_verifications.get(&evidence_id).unwrap_or_default()
+            self.evidence_verifications
+                .get(&evidence_id)
+                .unwrap_or_default()
         }
 
         /// Check if evidence has been verified by majority of verifiers
         #[ink(message)]
         pub fn is_evidence_verified(&self, evidence_id: u64) -> bool {
-            let verifications = self.evidence_verifications.get(&evidence_id).unwrap_or_default();
+            let verifications = self
+                .evidence_verifications
+                .get(&evidence_id)
+                .unwrap_or_default();
             if verifications.is_empty() {
                 return false;
             }
@@ -2654,7 +1880,10 @@ mod propchain_insurance {
             evidence_id: u64,
         ) -> Option<(u64, u64, u64, bool)> {
             // Returns (total_verifications, valid_count, invalid_count, is_consensus_valid)
-            let verifications = self.evidence_verifications.get(&evidence_id).unwrap_or_default();
+            let verifications = self
+                .evidence_verifications
+                .get(&evidence_id)
+                .unwrap_or_default();
             if verifications.is_empty() {
                 return None;
             }
@@ -2676,7 +1905,8 @@ mod propchain_insurance {
         ) -> Result<Vec<u64>, InsuranceError> {
             let mut evidence_ids = Vec::new();
 
-            for (evidence_type, ipfs_hash, content_hash, file_size, metadata_url) in evidence_items {
+            for (evidence_type, ipfs_hash, content_hash, file_size, metadata_url) in evidence_items
+            {
                 let evidence_id = self.submit_evidence(
                     claim_id,
                     evidence_type,
@@ -2694,16 +1924,13 @@ mod propchain_insurance {
 
         /// Calculate storage cost for evidence (for fee calculation)
         #[ink(message)]
-        pub fn calculate_evidence_storage_cost(
-            &self,
-            evidence_id: u64,
-        ) -> Option<u128> {
+        pub fn calculate_evidence_storage_cost(&self, evidence_id: u64) -> Option<u128> {
             if let Some(evidence) = self.evidence_items.get(&evidence_id) {
                 // Cost calculation: base cost + size-based cost + verification cost
                 let base_cost: u128 = 1000; // Base storage cost
                 let size_cost: u128 = (evidence.file_size as u128) * 10; // Per byte cost
                 let verification_bonus: u128 = if evidence.verified { 500 } else { 0 };
-                
+
                 Some(base_cost + size_cost + verification_bonus)
             } else {
                 None
@@ -2736,10 +1963,6 @@ mod propchain_insurance {
         fn verify_content_hash(&self, hash: &[u8]) -> bool {
             hash.len() == 32 // SHA-256 hash length
         }
-
-        // =====================================================================
-        // REINSURANCE
-        // =====================================================================
 
         /// Register a reinsurance agreement (admin only)
         #[ink(message)]
@@ -3321,12 +2544,6 @@ mod insurance_tests {
         ClaimStatus, CoverageType, EvidenceMetadata, InsuranceError, PolicyStatus,
         PropertyInsurance,
     };
-
-#[cfg(test)]
-mod expiration_tests;
-
-#[cfg(test)]
-mod evidence_tests;
 
     fn valid_evidence() -> EvidenceMetadata {
         EvidenceMetadata {
@@ -4760,5 +3977,283 @@ mod evidence_tests;
         // Should be auto-approved and PAID because of event_id 101
         assert_eq!(claim.status, ClaimStatus::Paid);
         assert!(claim.payout_amount > 0);
+    }
+
+    // =========================================================================
+    // BATCH CLAIM TESTS
+    // =========================================================================
+
+    #[ink::test]
+    fn test_batch_approve_claims_works() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+
+        // Setup pool and policies
+        let pool_id = create_pool(&mut contract);
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+
+        // Create multiple policies and claims
+        let mut claim_ids = Vec::new();
+        for i in 0..3 {
+            add_risk_assessment(&mut contract, i + 1);
+            test::set_value_transferred::<DefaultEnvironment>(1_000_000_000u128);
+            let policy_result = contract.create_policy(
+                i + 1,
+                CoverageType::Fire,
+                100_000_000_000u128,
+                pool_id,
+                86400 * 365,
+            );
+            assert!(policy_result.is_ok());
+            let policy_id = policy_result.unwrap();
+
+            // Submit claim
+            let claim_result = contract.submit_claim(
+                policy_id,
+                50_000_000_000u128,
+                format!("Test claim {}", i),
+                valid_evidence(),
+            );
+            assert!(claim_result.is_ok());
+            claim_ids.push(claim_result.unwrap());
+        }
+
+        // Set caller as authorized assessor
+        test::set_caller::<DefaultEnvironment>(accounts.alice);
+        contract.add_authorized_assessor(accounts.alice).unwrap();
+
+        // Batch approve all claims
+        let result = contract.batch_approve_claims(claim_ids.clone(), "ipfs://batch-report".into());
+
+        assert!(result.is_ok());
+        let summary = result.unwrap();
+
+        // Verify summary
+        assert_eq!(summary.total_processed, 3);
+        assert_eq!(summary.successful, 3);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.results.len(), 3);
+
+        // Verify all claims succeeded
+        for result in summary.results.iter() {
+            assert!(result.success);
+            assert!(result.error.is_none());
+
+            // Verify claim status
+            let claim = contract.get_claim(result.claim_id).unwrap();
+            assert_eq!(claim.status, ClaimStatus::Approved);
+        }
+    }
+
+    #[ink::test]
+    fn test_batch_reject_claims_works() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+
+        // Setup pool and policies
+        let pool_id = create_pool(&mut contract);
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+
+        // Create multiple policies and claims
+        let mut claim_ids = Vec::new();
+        for i in 0..3 {
+            add_risk_assessment(&mut contract, i + 1);
+            test::set_value_transferred::<DefaultEnvironment>(1_000_000_000u128);
+            let policy_result = contract.create_policy(
+                i + 1,
+                CoverageType::Fire,
+                100_000_000_000u128,
+                pool_id,
+                86400 * 365,
+            );
+            assert!(policy_result.is_ok());
+            let policy_id = policy_result.unwrap();
+
+            // Submit claim
+            let claim_result = contract.submit_claim(
+                policy_id,
+                50_000_000_000u128,
+                format!("Test claim {}", i),
+                valid_evidence(),
+            );
+            assert!(claim_result.is_ok());
+            claim_ids.push(claim_result.unwrap());
+        }
+
+        // Set caller as authorized assessor
+        test::set_caller::<DefaultEnvironment>(accounts.alice);
+        contract.add_authorized_assessor(accounts.alice).unwrap();
+
+        // Batch reject all claims
+        let result =
+            contract.batch_reject_claims(claim_ids.clone(), "Does not meet criteria".into());
+
+        assert!(result.is_ok());
+        let summary = result.unwrap();
+
+        // Verify summary
+        assert_eq!(summary.total_processed, 3);
+        assert_eq!(summary.successful, 3);
+        assert_eq!(summary.failed, 0);
+
+        // Verify all claims were rejected
+        for result in summary.results.iter() {
+            assert!(result.success);
+            assert!(result.error.is_none());
+
+            // Verify claim status
+            let claim = contract.get_claim(result.claim_id).unwrap();
+            assert_eq!(claim.status, ClaimStatus::Rejected);
+            assert_eq!(claim.rejection_reason, "Does not meet criteria");
+        }
+    }
+
+    #[ink::test]
+    fn test_batch_approve_partial_failure() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+
+        // Setup pool and policy
+        let pool_id = create_pool(&mut contract);
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+
+        add_risk_assessment(&mut contract, 1);
+        test::set_value_transferred::<DefaultEnvironment>(1_000_000_000u128);
+        let policy_result = contract.create_policy(
+            1,
+            CoverageType::Fire,
+            100_000_000_000u128,
+            pool_id,
+            86400 * 365,
+        );
+        assert!(policy_result.is_ok());
+        let policy_id = policy_result.unwrap();
+
+        // Submit one valid claim
+        let claim_result = contract.submit_claim(
+            policy_id,
+            50_000_000_000u128,
+            "Valid claim".into(),
+            valid_evidence(),
+        );
+        assert!(claim_result.is_ok());
+        let valid_claim_id = claim_result.unwrap();
+
+        // Add invalid claim ID (doesn't exist)
+        let invalid_claim_id = 999u64;
+
+        // Set caller as authorized assessor
+        test::set_caller::<DefaultEnvironment>(accounts.alice);
+        contract.add_authorized_assessor(accounts.alice).unwrap();
+
+        // Batch approve with mix of valid and invalid claims
+        let mut claim_ids = Vec::new();
+        claim_ids.push(valid_claim_id);
+        claim_ids.push(invalid_claim_id);
+
+        let result = contract.batch_approve_claims(claim_ids, "ipfs://report".into());
+
+        assert!(result.is_ok());
+        let summary = result.unwrap();
+
+        // Verify partial success
+        assert_eq!(summary.total_processed, 2);
+        assert_eq!(summary.successful, 1);
+        assert_eq!(summary.failed, 1);
+
+        // Check individual results
+        let valid_result = summary.results.get(0).unwrap();
+        assert!(valid_result.success);
+        assert!(valid_result.error.is_none());
+        assert_eq!(valid_result.claim_id, valid_claim_id);
+
+        let invalid_result = summary.results.get(1).unwrap();
+        assert!(!invalid_result.success);
+        assert!(invalid_result.error.is_some());
+        assert_eq!(invalid_result.error.unwrap(), InsuranceError::ClaimNotFound);
+        assert_eq!(invalid_result.claim_id, invalid_claim_id);
+    }
+
+    #[ink::test]
+    fn test_batch_approve_unauthorized() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+
+        let claim_ids = Vec::new();
+        let result = contract.batch_approve_claims(claim_ids, "ipfs://report".into());
+
+        assert_eq!(result.unwrap_err(), InsuranceError::Unauthorized);
+    }
+
+    #[ink::test]
+    fn test_batch_reject_unauthorized() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+
+        let claim_ids = Vec::new();
+        let result = contract.batch_reject_claims(claim_ids, "Reason".into());
+
+        assert_eq!(result.unwrap_err(), InsuranceError::Unauthorized);
+    }
+
+    #[ink::test]
+    fn test_batch_approve_already_processed() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+
+        // Setup
+        let pool_id = create_pool(&mut contract);
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+
+        add_risk_assessment(&mut contract, 1);
+        test::set_value_transferred::<DefaultEnvironment>(1_000_000_000u128);
+        let policy_result = contract.create_policy(
+            1,
+            CoverageType::Fire,
+            100_000_000_000u128,
+            pool_id,
+            86400 * 365,
+        );
+        assert!(policy_result.is_ok());
+        let policy_id = policy_result.unwrap();
+
+        // Submit and approve claim
+        let claim_result = contract.submit_claim(
+            policy_id,
+            50_000_000_000u128,
+            "Test claim".into(),
+            valid_evidence(),
+        );
+        assert!(claim_result.is_ok());
+        let claim_id = claim_result.unwrap();
+
+        // First approval
+        test::set_caller::<DefaultEnvironment>(accounts.alice);
+        contract.add_authorized_assessor(accounts.alice).unwrap();
+
+        let first_result =
+            contract.batch_approve_claims(vec![claim_id].into(), "ipfs://report1".into());
+        assert!(first_result.is_ok());
+
+        // Try to approve again (should fail for this claim)
+        let mut claim_ids = Vec::new();
+        claim_ids.push(claim_id);
+        let second_result = contract.batch_approve_claims(claim_ids, "ipfs://report2".into());
+
+        assert!(second_result.is_ok());
+        let summary = second_result.unwrap();
+
+        // Should have 1 failure due to ClaimAlreadyProcessed
+        assert_eq!(summary.total_processed, 1);
+        assert_eq!(summary.successful, 0);
+        assert_eq!(summary.failed, 1);
+
+        let result = summary.results.get(0).unwrap();
+        assert!(!result.success);
+        assert_eq!(result.error.unwrap(), InsuranceError::ClaimAlreadyProcessed);
     }
 }

@@ -793,8 +793,8 @@ fn test_active_proposal_count_decrement() {
 
 #[test]
 fn test_configure_multi_sig() {
-    use crate::{SignerInfo, MultiSigConfig};
-    
+    use crate::{MultiSigConfig, SignerInfo};
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -807,16 +807,42 @@ fn test_configure_multi_sig() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67, // pause quorum and threshold
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67, // pause quorum and threshold
     );
 
     // Create signer list
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 1, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-        SignerInfo { address: signer3.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer3.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
 
     // Configure multi-sig with threshold of 2 out of 3
     let result = GovernanceContract::configure_multi_sig(&env, admin.clone(), signers, 2);
@@ -833,7 +859,7 @@ fn test_configure_multi_sig() {
 #[test]
 fn test_multi_sig_invalid_threshold() {
     use crate::SignerInfo;
-    
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -845,15 +871,37 @@ fn test_multi_sig_invalid_threshold() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67,
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67,
     );
 
     // Create signer list with total weight of 2
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 1, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
 
     // Try to configure with invalid threshold (greater than total weight)
     let result = std::panic::catch_unwind(|| {
@@ -864,8 +912,8 @@ fn test_multi_sig_invalid_threshold() {
 
 #[test]
 fn test_create_multi_sig_proposal() {
-    use crate::{SignerInfo, OperationType};
-    
+    use crate::{OperationType, SignerInfo};
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -878,22 +926,52 @@ fn test_create_multi_sig_proposal() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67,
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67,
     );
 
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 1, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-        SignerInfo { address: signer3.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer3.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
     GovernanceContract::configure_multi_sig(&env, admin.clone(), signers, 2).unwrap();
 
     // Create multi-sig pause proposal
-    let operation_data = Map::from_array(&env, [
-        (Symbol::short("reason"), String::from_str(&env, "Security concern")),
-    ]);
-    
+    let operation_data = Map::from_array(
+        &env,
+        [(
+            Symbol::short("reason"),
+            String::from_str(&env, "Security concern"),
+        )],
+    );
+
     let result = GovernanceContract::create_multi_sig_proposal(
         &env,
         signer1.clone(),
@@ -914,8 +992,8 @@ fn test_create_multi_sig_proposal() {
 
 #[test]
 fn test_multi_sig_confirmation() {
-    use crate::{SignerInfo, OperationType};
-    
+    use crate::{OperationType, SignerInfo};
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -928,21 +1006,51 @@ fn test_multi_sig_confirmation() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67,
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67,
     );
 
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 1, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-        SignerInfo { address: signer3.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer3.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
     GovernanceContract::configure_multi_sig(&env, admin.clone(), signers, 2).unwrap();
 
     // Create proposal
-    let operation_data = Map::from_array(&env, [
-        (Symbol::short("reason"), String::from_str(&env, "Security concern")),
-    ]);
+    let operation_data = Map::from_array(
+        &env,
+        [(
+            Symbol::short("reason"),
+            String::from_str(&env, "Security concern"),
+        )],
+    );
     let proposal_id = GovernanceContract::create_multi_sig_proposal(
         &env,
         signer1.clone(),
@@ -950,14 +1058,12 @@ fn test_multi_sig_confirmation() {
         operation_data,
         None,
         604800,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Second signer confirms
-    let confirm_result = GovernanceContract::confirm_multi_sig_proposal(
-        &env,
-        signer2.clone(),
-        proposal_id,
-    );
+    let confirm_result =
+        GovernanceContract::confirm_multi_sig_proposal(&env, signer2.clone(), proposal_id);
     assert!(confirm_result.is_ok());
 
     // Verify confirmation increased weight
@@ -965,18 +1071,18 @@ fn test_multi_sig_confirmation() {
     assert_eq!(proposal.confirmed_weight, 2); // Now meets threshold
 
     // Try to confirm again (should fail)
-    let duplicate_confirm = GovernanceContract::confirm_multi_sig_proposal(
-        &env,
-        signer2.clone(),
-        proposal_id,
+    let duplicate_confirm =
+        GovernanceContract::confirm_multi_sig_proposal(&env, signer2.clone(), proposal_id);
+    assert_eq!(
+        duplicate_confirm,
+        Err(GovernanceError::MultiSigAlreadyConfirmed)
     );
-    assert_eq!(duplicate_confirm, Err(GovernanceError::MultiSigAlreadyConfirmed));
 }
 
 #[test]
 fn test_multi_sig_execution() {
-    use crate::{SignerInfo, OperationType};
-    
+    use crate::{OperationType, SignerInfo};
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -989,21 +1095,51 @@ fn test_multi_sig_execution() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67,
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67,
     );
 
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 1, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-        SignerInfo { address: signer3.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer3.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
     GovernanceContract::configure_multi_sig(&env, admin.clone(), signers, 2).unwrap();
 
     // Create pause proposal
-    let operation_data = Map::from_array(&env, [
-        (Symbol::short("reason"), String::from_str(&env, "Security concern")),
-    ]);
+    let operation_data = Map::from_array(
+        &env,
+        [(
+            Symbol::short("reason"),
+            String::from_str(&env, "Security concern"),
+        )],
+    );
     let proposal_id = GovernanceContract::create_multi_sig_proposal(
         &env,
         signer1.clone(),
@@ -1011,7 +1147,8 @@ fn test_multi_sig_execution() {
         operation_data,
         None,
         604800,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Second signer confirms
     GovernanceContract::confirm_multi_sig_proposal(&env, signer2.clone(), proposal_id).unwrap();
@@ -1028,18 +1165,18 @@ fn test_multi_sig_execution() {
     assert!(GovernanceContract::is_paused(&env));
 
     // Try to execute again (should fail)
-    let duplicate_execute = GovernanceContract::execute_multi_sig_proposal(
-        &env,
-        signer1,
-        proposal_id,
+    let duplicate_execute =
+        GovernanceContract::execute_multi_sig_proposal(&env, signer1, proposal_id);
+    assert_eq!(
+        duplicate_execute,
+        Err(GovernanceError::MultiSigProposalAlreadyExecuted)
     );
-    assert_eq!(duplicate_execute, Err(GovernanceError::MultiSigProposalAlreadyExecuted));
 }
 
 #[test]
 fn test_multi_sig_unpause() {
-    use crate::{SignerInfo, OperationType};
-    
+    use crate::{OperationType, SignerInfo};
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -1051,20 +1188,46 @@ fn test_multi_sig_unpause() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67,
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67,
     );
 
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 1, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
     GovernanceContract::configure_multi_sig(&env, admin.clone(), signers, 2).unwrap();
 
     // First pause the contract
-    let pause_data = Map::from_array(&env, [
-        (Symbol::short("reason"), String::from_str(&env, "Security concern")),
-    ]);
+    let pause_data = Map::from_array(
+        &env,
+        [(
+            Symbol::short("reason"),
+            String::from_str(&env, "Security concern"),
+        )],
+    );
     let pause_proposal_id = GovernanceContract::create_multi_sig_proposal(
         &env,
         signer1.clone(),
@@ -1072,17 +1235,24 @@ fn test_multi_sig_unpause() {
         pause_data,
         None,
         604800,
-    ).unwrap();
-    GovernanceContract::confirm_multi_sig_proposal(&env, signer2.clone(), pause_proposal_id).unwrap();
-    GovernanceContract::execute_multi_sig_proposal(&env, signer1.clone(), pause_proposal_id).unwrap();
+    )
+    .unwrap();
+    GovernanceContract::confirm_multi_sig_proposal(&env, signer2.clone(), pause_proposal_id)
+        .unwrap();
+    GovernanceContract::execute_multi_sig_proposal(&env, signer1.clone(), pause_proposal_id)
+        .unwrap();
 
     // Verify contract is paused
     assert!(GovernanceContract::is_paused(&env));
 
     // Create unpause proposal
-    let unpause_data = Map::from_array(&env, [
-        (Symbol::short("reason"), String::from_str(&env, "Issue resolved")),
-    ]);
+    let unpause_data = Map::from_array(
+        &env,
+        [(
+            Symbol::short("reason"),
+            String::from_str(&env, "Issue resolved"),
+        )],
+    );
     let unpause_proposal_id = GovernanceContract::create_multi_sig_proposal(
         &env,
         signer1.clone(),
@@ -1090,15 +1260,14 @@ fn test_multi_sig_unpause() {
         unpause_data,
         None,
         604800,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Confirm and execute unpause
-    GovernanceContract::confirm_multi_sig_proposal(&env, signer2.clone(), unpause_proposal_id).unwrap();
-    let execute_result = GovernanceContract::execute_multi_sig_proposal(
-        &env,
-        signer1.clone(),
-        unpause_proposal_id,
-    );
+    GovernanceContract::confirm_multi_sig_proposal(&env, signer2.clone(), unpause_proposal_id)
+        .unwrap();
+    let execute_result =
+        GovernanceContract::execute_multi_sig_proposal(&env, signer1.clone(), unpause_proposal_id);
     assert!(execute_result.is_ok());
 
     // Verify contract is unpaused
@@ -1107,8 +1276,8 @@ fn test_multi_sig_unpause() {
 
 #[test]
 fn test_multi_sig_invalid_signer() {
-    use crate::{SignerInfo, OperationType};
-    
+    use crate::{OperationType, SignerInfo};
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -1121,20 +1290,43 @@ fn test_multi_sig_invalid_signer() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67,
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67,
     );
 
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 1, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
     GovernanceContract::configure_multi_sig(&env, admin.clone(), signers, 2).unwrap();
 
     // Try to create proposal from non-signer (should fail)
-    let operation_data = Map::from_array(&env, [
-        (Symbol::short("reason"), String::from_str(&env, "Test")),
-    ]);
+    let operation_data = Map::from_array(
+        &env,
+        [(Symbol::short("reason"), String::from_str(&env, "Test"))],
+    );
     let result = GovernanceContract::create_multi_sig_proposal(
         &env,
         non_signer.clone(),
@@ -1153,20 +1345,18 @@ fn test_multi_sig_invalid_signer() {
         operation_data,
         None,
         604800,
-    ).unwrap();
+    )
+    .unwrap();
 
-    let confirm_result = GovernanceContract::confirm_multi_sig_proposal(
-        &env,
-        non_signer,
-        proposal_id,
-    );
+    let confirm_result =
+        GovernanceContract::confirm_multi_sig_proposal(&env, non_signer, proposal_id);
     assert_eq!(confirm_result, Err(GovernanceError::MultiSigInvalidSigner));
 }
 
 #[test]
 fn test_multi_sig_add_remove_signer() {
     use crate::SignerInfo;
-    
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -1179,23 +1369,40 @@ fn test_multi_sig_add_remove_signer() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67,
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67,
     );
 
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 1, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 1,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
     GovernanceContract::configure_multi_sig(&env, admin.clone(), signers, 2).unwrap();
 
     // Add new signer (requires existing signer approval)
-    let add_result = GovernanceContract::add_signer(
-        &env,
-        signer1.clone(),
-        new_signer.clone(),
-        1,
-    );
+    let add_result = GovernanceContract::add_signer(&env, signer1.clone(), new_signer.clone(), 1);
     assert!(add_result.is_ok());
 
     // Verify signer was added
@@ -1203,11 +1410,8 @@ fn test_multi_sig_add_remove_signer() {
     assert_eq!(config.signers.len(), 3);
 
     // Remove signer (requires existing signer approval)
-    let remove_result = GovernanceContract::remove_signer(
-        &env,
-        signer2.clone(),
-        new_signer.clone(),
-    );
+    let remove_result =
+        GovernanceContract::remove_signer(&env, signer2.clone(), new_signer.clone());
     assert!(remove_result.is_ok());
 
     // Verify signer was removed
@@ -1218,7 +1422,7 @@ fn test_multi_sig_add_remove_signer() {
 #[test]
 fn test_is_signer_and_get_weight() {
     use crate::SignerInfo;
-    
+
     let env = Env::default();
     let admin = Address::generate(&env);
     let token_contract = Address::generate(&env);
@@ -1230,14 +1434,36 @@ fn test_is_signer_and_get_weight() {
         &env,
         admin.clone(),
         token_contract,
-        7, 51, 10, 100, 5, 86400, false, 1, 1, false, 3600,
-        60, 67,
+        7,
+        51,
+        10,
+        100,
+        5,
+        86400,
+        false,
+        1,
+        1,
+        false,
+        3600,
+        60,
+        67,
     );
 
-    let signers = Vec::from_array(&env, [
-        SignerInfo { address: signer1.clone(), weight: 2, active: true },
-        SignerInfo { address: signer2.clone(), weight: 1, active: true },
-    ]);
+    let signers = Vec::from_array(
+        &env,
+        [
+            SignerInfo {
+                address: signer1.clone(),
+                weight: 2,
+                active: true,
+            },
+            SignerInfo {
+                address: signer2.clone(),
+                weight: 1,
+                active: true,
+            },
+        ],
+    );
     GovernanceContract::configure_multi_sig(&env, admin.clone(), signers, 2).unwrap();
 
     let config = GovernanceContract::get_multi_sig_config(&env).unwrap();
@@ -1245,12 +1471,21 @@ fn test_is_signer_and_get_weight() {
     // Test is_signer
     assert!(GovernanceContract::is_signer(&env, &signer1, &config));
     assert!(GovernanceContract::is_signer(&env, &signer2, &config));
-    
+
     let non_signer = Address::generate(&env);
     assert!(!GovernanceContract::is_signer(&env, &non_signer, &config));
 
     // Test get_signer_weight
-    assert_eq!(GovernanceContract::get_signer_weight(&env, &signer1, &config), 2);
-    assert_eq!(GovernanceContract::get_signer_weight(&env, &signer2, &config), 1);
-    assert_eq!(GovernanceContract::get_signer_weight(&env, &non_signer, &config), 0);
+    assert_eq!(
+        GovernanceContract::get_signer_weight(&env, &signer1, &config),
+        2
+    );
+    assert_eq!(
+        GovernanceContract::get_signer_weight(&env, &signer2, &config),
+        1
+    );
+    assert_eq!(
+        GovernanceContract::get_signer_weight(&env, &non_signer, &config),
+        0
+    );
 }

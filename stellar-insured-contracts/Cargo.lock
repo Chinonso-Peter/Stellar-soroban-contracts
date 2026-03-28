@@ -5045,6 +5045,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "propchain-policy"
+version = "1.0.0"
+dependencies = [
+ "ink 5.1.1",
+ "ink_e2e",
+ "parity-scale-codec",
+ "scale-info",
+]
+
+[[package]]
 name = "propchain-proxy"
 version = "1.0.0"
 dependencies = [
