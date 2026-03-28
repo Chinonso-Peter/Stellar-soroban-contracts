@@ -77,3 +77,40 @@ fn test_emergency_pause_prevents_claims() {
     assert!(!clm.is_paused());
     assert!(clm.submit_claim(&pol_addr, &1u64, &1u64, &5_000_000i128).is_ok());
 }
+
+#[test]
+fn test_claim_evidence_management() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (pol_addr, admin, guardian, pol, clm, _pool) = setup(&env);
+    let holder = Address::generate(&env);
+
+    pol.issue_policy(&holder, &1u64, &10_000_000i128, &100_000i128).unwrap();
+    clm.submit_claim(&pol_addr, &1u64, &1u64, &5_000_000i128).unwrap();
+
+    let evidence_id = clm.submit_evidence(&1u64, &"QmEvidenceHash".to_string(), &false, &Some("report".to_string()), &holder).unwrap();
+    assert!(evidence_id > 0);
+
+    let witness_ids = clm.get_claim_evidence_ids(&1u64).unwrap();
+    assert_eq!(witness_ids.len(), 1);
+    assert_eq!(witness_ids[0], evidence_id);
+
+    let evidence = clm.get_evidence(&holder, &evidence_id).unwrap();
+    assert_eq!(evidence.claim_id, 1u64);
+    assert_eq!(evidence.ipfs_hash, "QmEvidenceHash".to_string());
+    assert!(!evidence.verified);
+
+    // Verify as admin
+    clm.verify_evidence(&admin, &evidence_id, &true, &Some("validated".to_string())).unwrap();
+    assert!(clm.is_evidence_verified(&evidence_id).unwrap());
+
+    let v = clm.get_evidence_verification_details(&evidence_id).unwrap();
+    assert_eq!(v.0, true);
+    assert_eq!(v.1, Some(admin));
+
+    // Sensitive evidence only visible to claimant/admin/guardian
+    let sensitive_id = clm.submit_evidence(&1u64, &"QmSensitive".to_string(), &true, &Some("private".to_string()), &holder).unwrap();
+    assert!(clm.get_evidence(&admin, &sensitive_id).is_ok());
+    let outsider = Address::generate(&env);
+    assert_eq!(clm.get_evidence(&outsider, &sensitive_id).unwrap_err(), ClaimError::Unauthorized);
+}
