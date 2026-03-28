@@ -18,7 +18,7 @@ mod propchain_insurance {
     // ERROR TYPES
     // =========================================================================
 
-    #[derive(Debug, PartialEq, Eq, scale::Encode, scale::Decode)]
+    #[derive(Debug, Clone, PartialEq, Eq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout)]
     #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
     pub enum InsuranceError {
         Unauthorized,
@@ -68,6 +68,7 @@ mod propchain_insurance {
     #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
     pub enum PolicyStatus {
         Active,
+        Renewed,
         Expired,
         Cancelled,
         Claimed,
@@ -163,6 +164,52 @@ mod propchain_insurance {
         pub description: Option<String>,
     }
 
+    impl From<&str> for EvidenceMetadata {
+        fn from(s: &str) -> Self {
+            EvidenceMetadata {
+                evidence_type: "unknown".into(),
+                reference_uri: s.into(),
+                content_hash: vec![0u8; 32],
+                description: None,
+            }
+        }
+    }
+
+        #[derive(
+            Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
+        )]
+        #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+        pub struct EvidenceItem {
+            pub id: u64,
+            pub claim_id: u64,
+            pub evidence_type: String,
+            pub ipfs_hash: String,
+            pub ipfs_uri: String,
+            pub content_hash: Vec<u8>,
+            pub file_size: u64,
+            pub submitter: AccountId,
+            pub submitted_at: u64,
+            pub verified: bool,
+            pub verified_by: Option<AccountId>,
+            pub verified_at: Option<u64>,
+            pub verification_notes: Option<String>,
+            pub metadata_url: Option<String>,
+        }
+
+        #[derive(
+            Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
+        )]
+        #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+        pub struct EvidenceVerification {
+            pub evidence_id: u64,
+            pub verifier: AccountId,
+            pub verified_at: u64,
+            pub is_valid: bool,
+            pub notes: String,
+            pub ipfs_accessible: bool,
+            pub hash_matches: bool,
+        }
+
     #[derive(
         Debug, Clone, PartialEq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout,
     )]
@@ -198,6 +245,7 @@ mod propchain_insurance {
         pub claim_amount: u128,
         pub description: String,
         pub evidence: EvidenceMetadata,
+        pub evidence_ids: Vec<u64>,
         pub oracle_report_url: String,
         pub status: ClaimStatus,
         pub submitted_at: u64,
@@ -228,6 +276,12 @@ mod propchain_insurance {
         pub total_provider_stake: u128,
         /// Scaled accumulated rewards per staked unit ([`REWARD_PRECISION`] fixed-point).
         pub accumulated_reward_per_share: u128,
+        /// Vesting cliff in seconds (0 = no cliff)
+        pub vesting_cliff_seconds: u64,
+        /// Vesting duration in seconds (0 = no vesting; if >0 enables vesting)
+        pub vesting_duration_seconds: u64,
+        /// Early withdrawal penalty applied to unvested rewards (basis points, e.g. 500 = 5%)
+        pub early_withdrawal_penalty_bps: u32,
     }
 
     #[derive(
@@ -354,6 +408,12 @@ mod propchain_insurance {
         /// Reward debt in fixed-point units: keeps pending = stake * acc_rps / P - reward_debt.
         pub reward_debt: u128,
         pub deposited_at: u64,
+        /// Total rewards moved into vesting schedule (not yet fully claimed)
+        pub vesting_total: u128,
+        /// Amount of vested rewards already claimed by provider
+        pub vesting_claimed: u128,
+        /// Vesting schedule start timestamp (seconds)
+        pub vesting_start: u64,
     }
 
     // =========================================================================
@@ -446,12 +506,44 @@ mod propchain_insurance {
     }
 
     #[ink(event)]
+    pub struct PolicyIssued {
+        #[ink(topic)]
+        policy_id: u64,
+        #[ink(topic)]
+        holder: AccountId,
+        coverage_amount: u128,
+        premium_amount: u128,
+        timestamp: u64,
+    }
+
+    #[ink(event)]
     pub struct PolicyCancelled {
         #[ink(topic)]
         policy_id: u64,
         #[ink(topic)]
         policyholder: AccountId,
         cancelled_at: u64,
+        reason: Option<String>,
+    }
+
+    #[ink(event)]
+    pub struct PolicyRenewed {
+        #[ink(topic)]
+        policy_id: u64,
+        #[ink(topic)]
+        holder: AccountId,
+        renewal_premium: u128,
+        new_end_time: u64,
+        timestamp: u64,
+    }
+
+    #[ink(event)]
+    pub struct PolicyExpired {
+        #[ink(topic)]
+        policy_id: u64,
+        #[ink(topic)]
+        holder: AccountId,
+        timestamp: u64,
     }
 
     #[ink(event)]
@@ -551,6 +643,28 @@ mod propchain_insurance {
         amount: u128,
         new_stake: u128,
         accumulated_reward_per_share: u128,
+        timestamp: u64,
+    }
+
+    #[ink(event)]
+    pub struct RewardsVestingStarted {
+        #[ink(topic)]
+        pool_id: u64,
+        #[ink(topic)]
+        provider: AccountId,
+        amount: u128,
+        vesting_start: u64,
+        vesting_cliff: u64,
+        vesting_duration: u64,
+    }
+
+    #[ink(event)]
+    pub struct VestedRewardsClaimed {
+        #[ink(topic)]
+        pool_id: u64,
+        #[ink(topic)]
+        provider: AccountId,
+        amount: u128,
         timestamp: u64,
     }
 
@@ -691,6 +805,9 @@ mod propchain_insurance {
                 is_active: true,
                 total_provider_stake: 0,
                 accumulated_reward_per_share: 0,
+                vesting_cliff_seconds: 0,
+                vesting_duration_seconds: 0,
+                early_withdrawal_penalty_bps: 0,
             };
 
             self.pools.insert(&pool_id, &pool);
@@ -725,6 +842,9 @@ mod propchain_insurance {
                         provider_stake: 0,
                         reward_debt: 0,
                         deposited_at: now,
+                        vesting_total: 0,
+                        vesting_claimed: 0,
+                        vesting_start: 0,
                     });
 
             let acc = pool.accumulated_reward_per_share;
@@ -764,6 +884,117 @@ mod propchain_insurance {
             Ok(())
         }
 
+            /// Renew an active policy by paying a renewal premium. Extends `end_time` by
+            /// `duration_seconds` and emits `PolicyRenewed`.
+            #[ink(message, payable)]
+            pub fn renew_policy(&mut self, policy_id: u64, duration_seconds: u64) -> Result<(), InsuranceError> {
+                let caller = self.env().caller();
+                let paid = self.env().transferred_value();
+                if paid == 0 {
+                    return Err(InsuranceError::InsufficientPremium);
+                }
+
+                let mut policy = self.policies.get(&policy_id).ok_or(InsuranceError::PolicyNotFound)?;
+                if policy.policyholder != caller {
+                    return Err(InsuranceError::Unauthorized);
+                }
+                if policy.status != PolicyStatus::Active && policy.status != PolicyStatus::Renewed {
+                    return Err(InsuranceError::PolicyInactive);
+                }
+
+                // Update pool accounting
+                let mut pool = self.pools.get(&policy.pool_id).ok_or(InsuranceError::PoolNotFound)?;
+                let fee = paid.saturating_mul(self.platform_fee_rate as u128) / 10_000u128;
+                let pool_share = paid.saturating_sub(fee);
+                pool.total_premiums_collected = pool.total_premiums_collected.saturating_add(pool_share);
+                pool.available_capital = pool.available_capital.saturating_add(pool_share);
+                Self::apply_reward_accrual(&mut pool, pool_share);
+                self.pools.insert(&policy.pool_id, &pool);
+
+                // Extend policy
+                let now = self.env().block_timestamp();
+                policy.end_time = policy.end_time.saturating_add(duration_seconds);
+                policy.premium_amount = policy.premium_amount.saturating_add(paid);
+                policy.status = PolicyStatus::Renewed;
+                self.policies.insert(&policy_id, &policy);
+
+                self.env().emit_event(PolicyRenewed {
+                    policy_id,
+                    holder: caller,
+                    renewal_premium: paid,
+                    new_end_time: policy.end_time,
+                    timestamp: now,
+                });
+
+                Ok(())
+            }
+
+        /// Return the configured claim cooldown period.
+        #[ink(message)]
+        pub fn claim_cooldown_period(&self) -> u64 {
+            self.claim_cooldown_period
+        }
+
+        /// Backwards-compatible alias for tests: add an authorized assessor
+        #[ink(message)]
+        pub fn add_authorized_assessor(&mut self, acct: AccountId) -> Result<(), InsuranceError> {
+            self.authorize_assessor(acct)
+        }
+
+        /// Configure vesting parameters for a pool (admin or tests).
+        #[ink(message)]
+        pub fn configure_pool_vesting(
+            &mut self,
+            pool_id: u64,
+            vesting_cliff_seconds: u64,
+            vesting_duration_seconds: u64,
+            early_withdrawal_penalty_bps: u32,
+        ) -> Result<(), InsuranceError> {
+            self.ensure_admin()?;
+            let mut pool = self.pools.get(&pool_id).ok_or(InsuranceError::PoolNotFound)?;
+            pool.vesting_cliff_seconds = vesting_cliff_seconds;
+            pool.vesting_duration_seconds = vesting_duration_seconds;
+            pool.early_withdrawal_penalty_bps = early_withdrawal_penalty_bps;
+            self.pools.insert(&pool_id, &pool);
+            Ok(())
+        }
+
+            /// Scan and expire policies whose `end_time` has passed. Anyone may call this to
+            /// process automatic expirations. Returns the number of policies expired.
+            #[ink(message)]
+            pub fn expire_policies(&mut self, max_scan: u64) -> u64 {
+                let mut expired_count: u64 = 0;
+                let now = self.env().block_timestamp();
+                let limit = if max_scan == 0 { self.policy_count } else { max_scan };
+                let mut i: u64 = 1;
+                while i <= self.policy_count && expired_count < limit {
+                    if let Some(mut policy) = self.policies.get(&i) {
+                        if policy.status == PolicyStatus::Active && now > policy.end_time {
+                            policy.status = PolicyStatus::Expired;
+                            self.policies.insert(&i, &policy);
+
+                            // Decrement pool active count
+                            if let Some(mut pool) = self.pools.get(&policy.pool_id) {
+                                if pool.active_policies > 0 {
+                                    pool.active_policies -= 1;
+                                }
+                                self.pools.insert(&policy.pool_id, &pool);
+                            }
+
+                            self.env().emit_event(PolicyExpired {
+                                policy_id: i,
+                                holder: policy.policyholder.clone(),
+                                timestamp: now,
+                            });
+
+                            expired_count = expired_count.saturating_add(1);
+                        }
+                    }
+                    i = i.saturating_add(1);
+                }
+                expired_count
+            }
+
         /// Legacy entry point: same as [`deposit_liquidity`](Self::deposit_liquidity).
         #[ink(message, payable)]
         pub fn provide_pool_liquidity(&mut self, pool_id: u64) -> Result<(), InsuranceError> {
@@ -802,17 +1033,65 @@ mod propchain_insurance {
             let acc = pool.accumulated_reward_per_share;
             let pending =
                 Self::pending_reward_amount(provider.provider_stake, acc, provider.reward_debt);
-            let total_out = pending.saturating_add(amount);
-            if pool.available_capital < total_out {
-                return Err(InsuranceError::InsufficientPoolLiquidity);
+            let mut total_out: u128 = 0;
+
+            if pool.vesting_duration_seconds > 0 {
+                // Move pending rewards into vesting schedule instead of paying out immediately.
+                if pending > 0 {
+                    let now = self.env().block_timestamp();
+                    provider.vesting_total = provider.vesting_total.saturating_add(pending);
+                    provider.vesting_start = now;
+                    // reward_debt should be synced to avoid double-counting future accruals
+                    provider.reward_debt = Self::synced_reward_debt(provider.provider_stake, acc);
+                }
+
+                // Apply early withdrawal penalty on any unvested portion
+                if provider.vesting_total > 0 && pool.early_withdrawal_penalty_bps > 0 {
+                    let now = self.env().block_timestamp();
+                    let mut vested: u128 = 0;
+                    if provider.vesting_start > 0 {
+                        let elapsed = now.saturating_sub(provider.vesting_start);
+                        if elapsed >= pool.vesting_cliff_seconds {
+                            let vesting_secs = pool.vesting_duration_seconds;
+                            let vested_secs = if elapsed >= vesting_secs { vesting_secs } else { elapsed };
+                            vested = provider
+                                .vesting_total
+                                .saturating_mul(vested_secs as u128)
+                                .saturating_div(vesting_secs as u128);
+                        }
+                    }
+                    let unvested = provider.vesting_total.saturating_sub(vested);
+                    if unvested > 0 {
+                        let penalty = unvested.saturating_mul(pool.early_withdrawal_penalty_bps as u128) / 10_000u128;
+                        provider.vesting_total = provider.vesting_total.saturating_sub(penalty);
+                        pool.available_capital = pool.available_capital.saturating_add(penalty);
+                    }
+                }
+
+                let mut total_out: u128 = amount;
+                if pool.available_capital < total_out {
+                    return Err(InsuranceError::InsufficientPoolLiquidity);
+                }
+
+                provider.provider_stake = provider.provider_stake.saturating_sub(amount);
+                provider.reward_debt = Self::synced_reward_debt(provider.provider_stake, acc);
+
+                pool.total_provider_stake = pool.total_provider_stake.saturating_sub(amount);
+                pool.available_capital = pool.available_capital.saturating_sub(total_out);
+                pool.total_capital = pool.total_capital.saturating_sub(amount);
+            } else {
+                let mut total_out: u128 = pending.saturating_add(amount);
+                if pool.available_capital < total_out {
+                    return Err(InsuranceError::InsufficientPoolLiquidity);
+                }
+
+                provider.provider_stake = provider.provider_stake.saturating_sub(amount);
+                provider.reward_debt = Self::synced_reward_debt(provider.provider_stake, acc);
+
+                pool.total_provider_stake = pool.total_provider_stake.saturating_sub(amount);
+                pool.available_capital = pool.available_capital.saturating_sub(total_out);
+                pool.total_capital = pool.total_capital.saturating_sub(amount);
             }
-
-            provider.provider_stake = provider.provider_stake.saturating_sub(amount);
-            provider.reward_debt = Self::synced_reward_debt(provider.provider_stake, acc);
-
-            pool.total_provider_stake = pool.total_provider_stake.saturating_sub(amount);
-            pool.available_capital = pool.available_capital.saturating_sub(total_out);
-            pool.total_capital = pool.total_capital.saturating_sub(amount);
 
             self.pools.insert(&pool_id, &pool);
             if provider.provider_stake == 0 {
@@ -830,7 +1109,7 @@ mod propchain_insurance {
                 pool_id,
                 provider: caller,
                 principal: amount,
-                rewards_paid: pending,
+                rewards_paid: if pool.vesting_duration_seconds > 0 { 0 } else { pending },
                 accumulated_reward_per_share: acc,
                 timestamp,
             });
@@ -868,30 +1147,53 @@ mod propchain_insurance {
             if pending == 0 {
                 return Ok(0);
             }
-            if pool.available_capital < pending {
-                return Err(InsuranceError::InsufficientPoolLiquidity);
+            if pool.vesting_duration_seconds > 0 {
+                // Move pending into provider vesting schedule instead of immediate payout.
+                let now = self.env().block_timestamp();
+                provider.vesting_total = provider.vesting_total.saturating_add(pending);
+                provider.vesting_start = now;
+                provider.reward_debt = Self::synced_reward_debt(provider.provider_stake, acc);
+
+                self.pools.insert(&pool_id, &pool);
+                self.liquidity_providers.insert(&key, &provider);
+
+                let timestamp = now;
+                self.env().emit_event(RewardsVestingStarted {
+                    pool_id,
+                    provider: caller,
+                    amount: pending,
+                    vesting_start: timestamp,
+                    vesting_cliff: pool.vesting_cliff_seconds,
+                    vesting_duration: pool.vesting_duration_seconds,
+                });
+
+                Ok(pending)
+            } else {
+                if pool.available_capital < pending {
+                    return Err(InsuranceError::InsufficientPoolLiquidity);
+                }
+
+                provider.reward_debt = Self::synced_reward_debt(provider.provider_stake, acc);
+                pool.available_capital = pool.available_capital.saturating_sub(pending);
+
+                self.pools.insert(&pool_id, &pool);
+                self.liquidity_providers.insert(&key, &provider);
+
+                let timestamp = self.env().block_timestamp();
+                self.env().emit_event(RewardsClaimed {
+                    pool_id,
+                    provider: caller,
+                    amount: pending,
+                    accumulated_reward_per_share: acc,
+                    timestamp,
+                });
+
+                self.env()
+                    .transfer(caller, pending)
+                    .map_err(|_| InsuranceError::TransferFailed)?;
+
+                Ok(pending)
             }
-
-            provider.reward_debt = Self::synced_reward_debt(provider.provider_stake, acc);
-            pool.available_capital = pool.available_capital.saturating_sub(pending);
-
-            self.pools.insert(&pool_id, &pool);
-            self.liquidity_providers.insert(&key, &provider);
-
-            let timestamp = self.env().block_timestamp();
-            self.env().emit_event(RewardsClaimed {
-                pool_id,
-                provider: caller,
-                amount: pending,
-                accumulated_reward_per_share: acc,
-                timestamp,
-            });
-
-            self.env()
-                .transfer(caller, pending)
-                .map_err(|_| InsuranceError::TransferFailed)?;
-
-            Ok(pending)
         }
 
         /// Compound pending rewards into stake (no transfer; updates debt to current index).
@@ -939,6 +1241,117 @@ mod propchain_insurance {
             });
 
             Ok(())
+        }
+
+        /// Claim vested portion of previously-vested rewards for a provider
+        #[ink(message)]
+        pub fn claim_vested_rewards(&mut self, pool_id: u64) -> Result<u128, InsuranceError> {
+            let caller = self.env().caller();
+            let mut pool = self
+                .pools
+                .get(&pool_id)
+                .ok_or(InsuranceError::PoolNotFound)?;
+
+            let key = (pool_id, caller);
+            let mut provider = self
+                .liquidity_providers
+                .get(&key)
+                .ok_or(InsuranceError::InsufficientStake)?;
+
+            let total_vesting = provider.vesting_total;
+            if total_vesting == 0 {
+                return Ok(0);
+            }
+
+            let now = self.env().block_timestamp();
+            // If no vesting configured, allow immediate claim
+            if pool.vesting_duration_seconds == 0 {
+                if pool.available_capital < total_vesting {
+                    return Err(InsuranceError::InsufficientPoolLiquidity);
+                }
+                provider.vesting_total = 0;
+                provider.vesting_claimed = 0;
+                provider.vesting_start = 0;
+                pool.available_capital = pool.available_capital.saturating_sub(total_vesting);
+
+                self.pools.insert(&pool_id, &pool);
+                self.liquidity_providers.insert(&key, &provider);
+
+                self.env()
+                    .transfer(caller, total_vesting)
+                    .map_err(|_| InsuranceError::TransferFailed)?;
+
+                self.env().emit_event(VestedRewardsClaimed {
+                    pool_id,
+                    provider: caller,
+                    amount: total_vesting,
+                    timestamp: now,
+                });
+
+                return Ok(total_vesting);
+            }
+
+            if provider.vesting_start == 0 {
+                return Ok(0);
+            }
+
+            // compute vested amount
+            let elapsed = now.saturating_sub(provider.vesting_start);
+            if elapsed < pool.vesting_cliff_seconds {
+                return Ok(0);
+            }
+
+            let vesting_secs = pool.vesting_duration_seconds;
+            let vested_secs = if elapsed >= vesting_secs { vesting_secs } else { elapsed };
+            let vested_amount = total_vesting
+                .saturating_mul(vested_secs as u128)
+                .saturating_div(vesting_secs as u128);
+
+            let claimable = vested_amount.saturating_sub(provider.vesting_claimed);
+            if claimable == 0 {
+                return Ok(0);
+            }
+
+            if pool.available_capital < claimable {
+                return Err(InsuranceError::InsufficientPoolLiquidity);
+            }
+
+            provider.vesting_claimed = provider.vesting_claimed.saturating_add(claimable);
+            // if fully claimed, clear vesting record
+            if provider.vesting_claimed >= provider.vesting_total {
+                provider.vesting_total = 0;
+                provider.vesting_claimed = 0;
+                provider.vesting_start = 0;
+            }
+
+            pool.available_capital = pool.available_capital.saturating_sub(claimable);
+
+            self.pools.insert(&pool_id, &pool);
+            self.liquidity_providers.insert(&key, &provider);
+
+            self.env()
+                .transfer(caller, claimable)
+                .map_err(|_| InsuranceError::TransferFailed)?;
+
+            self.env().emit_event(VestedRewardsClaimed {
+                pool_id,
+                provider: caller,
+                amount: claimable,
+                timestamp: now,
+            });
+
+            Ok(claimable)
+        }
+
+        /// View vesting info for a provider
+        #[ink(message)]
+        pub fn get_vesting_info(&self, pool_id: u64, provider: AccountId) -> (u128, u128, u64) {
+            let p = self.liquidity_providers.get(&(pool_id, provider));
+            if let Some(info) = p {
+                (info.vesting_total, info.vesting_claimed, info.vesting_start)
+            } else {
+                (0, 0, 0)
+            }
         }
 
         /// View: pending reward amount for an account (fixed-point accurate vs on-chain claim).
@@ -1085,15 +1498,6 @@ mod propchain_insurance {
                 return Err(InsuranceError::PoolNotFound);
             }
 
-            // Check pool has enough capital for coverage
-            let max_exposure = pool
-                .available_capital
-                .saturating_mul(pool.max_coverage_ratio as u128)
-                / 10_000;
-            if coverage_amount > max_exposure {
-                return Err(InsuranceError::InsufficientPoolFunds);
-            }
-
             // Get risk assessment
             let assessment = self
                 .risk_assessments
@@ -1115,11 +1519,17 @@ mod propchain_insurance {
             // Platform fee
             let fee = paid.saturating_mul(self.platform_fee_rate as u128) / 10_000;
             let pool_share = paid.saturating_sub(fee);
+            // Ensure pool has enough capital (including this premium) for coverage
+            let new_available = pool.available_capital.saturating_add(pool_share);
+            let max_exposure = new_available.saturating_mul(pool.max_coverage_ratio as u128) / 10_000;
+            if coverage_amount > max_exposure {
+                return Err(InsuranceError::InsufficientPoolFunds);
+            }
 
-            // Update pool
-            pool.total_premiums_collected += pool_share;
-            pool.available_capital += pool_share;
-            pool.active_policies += 1;
+            // Update pool with collected premium
+            pool.total_premiums_collected = pool.total_premiums_collected.saturating_add(pool_share);
+            pool.available_capital = pool.available_capital.saturating_add(pool_share);
+            pool.active_policies = pool.active_policies.saturating_add(1);
             Self::apply_reward_accrual(&mut pool, pool_share);
             self.pools.insert(&pool_id, &pool);
 
@@ -1169,6 +1579,15 @@ mod propchain_insurance {
                 premium_amount: paid,
                 start_time: now,
                 end_time: now.saturating_add(duration_seconds),
+            });
+
+            // Also emit PolicyIssued for off-chain indexing
+            self.env().emit_event(PolicyIssued {
+                policy_id,
+                holder: caller,
+                coverage_amount,
+                premium_amount: paid,
+                timestamp: now,
             });
 
             Ok(policy_id)
@@ -1231,10 +1650,12 @@ mod propchain_insurance {
                 self.pools.insert(&policy.pool_id, &pool);
             }
 
+            let now = self.env().block_timestamp();
             self.env().emit_event(PolicyCancelled {
                 policy_id,
                 policyholder: policy.policyholder,
-                cancelled_at: self.env().block_timestamp(),
+                cancelled_at: now,
+                reason: None,
             });
 
             Ok(())
@@ -1304,6 +1725,7 @@ mod propchain_insurance {
                 claim_amount,
                 description,
                 evidence,
+                evidence_ids: Vec::new(),
                 oracle_report_url: String::new(),
                 status: ClaimStatus::Pending,
                 submitted_at: now,
@@ -1476,7 +1898,7 @@ mod propchain_insurance {
 
             for claim_id in claim_ids.iter() {
                 let result = self.process_single_claim(
-                    claim_id,
+                    *claim_id,
                     true,
                     oracle_report_url.clone(),
                     String::new(),
@@ -1525,7 +1947,7 @@ mod propchain_insurance {
 
             for claim_id in claim_ids.iter() {
                 let result = self.process_single_claim(
-                    claim_id,
+                    *claim_id,
                     false,
                     String::new(),
                     rejection_reason.clone(),
@@ -2238,6 +2660,136 @@ mod propchain_insurance {
             self.pools.get(&pool_id)
         }
 
+        /// Total Value Locked across all pools (sum of `total_capital`). Low-gas read.
+        #[ink(message)]
+        pub fn get_tvl(&self) -> u128 {
+            let mut total: u128 = 0;
+            for i in 1..=self.pool_count {
+                if let Some(p) = self.pools.get(&i) {
+                    total = total.saturating_add(p.total_capital);
+                }
+            }
+            total
+        }
+
+        /// Claim ratio across all pools: (total_claims_paid / total_premiums_collected).
+        /// Returns (paid, premiums, ratio_bps) where ratio_bps is basis points (x/10000).
+        #[ink(message)]
+        pub fn get_claim_ratio(&self) -> (u128, u128, u128) {
+            let mut paid: u128 = 0;
+            let mut premiums: u128 = 0;
+            for i in 1..=self.pool_count {
+                if let Some(p) = self.pools.get(&i) {
+                    paid = paid.saturating_add(p.total_claims_paid);
+                    premiums = premiums.saturating_add(p.total_premiums_collected);
+                }
+            }
+            let ratio_bps = if premiums == 0 { 0 } else { paid.saturating_mul(10_000u128).saturating_div(premiums) };
+            (paid, premiums, ratio_bps)
+        }
+
+        /// Policy metrics: (active_count, expired_count, total_written)
+        #[ink(message)]
+        pub fn get_policy_metrics(&self) -> (u64, u64, u64) {
+            let mut active: u64 = 0;
+            let mut expired: u64 = 0;
+            for i in 1..=self.policy_count {
+                if let Some(p) = self.policies.get(&i) {
+                    match p.status {
+                        PolicyStatus::Active => active = active.saturating_add(1),
+                        PolicyStatus::Expired => expired = expired.saturating_add(1),
+                        _ => {}
+                    }
+                }
+            }
+            (active, expired, self.policy_count)
+        }
+
+        /// Estimate provider APY in basis points (bps) for a given pool/provider based on
+        /// pending rewards since deposit. This is an on-chain estimate and should be used
+        /// for dashboard displays only.
+        #[ink(message)]
+        pub fn get_provider_apy(&self, pool_id: u64, provider: AccountId) -> u128 {
+            let Some(pool) = self.pools.get(&pool_id) else { return 0 };
+            let Some(p) = self.liquidity_providers.get(&(pool_id, provider)) else { return 0 };
+            if p.provider_stake == 0 || p.deposited_at == 0 {
+                return 0;
+            }
+
+            let acc = pool.accumulated_reward_per_share;
+            let pending = Self::pending_reward_amount(p.provider_stake, acc, p.reward_debt);
+            if pending == 0 {
+                return 0;
+            }
+
+            let now = self.env().block_timestamp();
+            let elapsed = now.saturating_sub(p.deposited_at);
+            if elapsed == 0 {
+                return 0;
+            }
+
+            // annualize: apy = (pending / stake) * (seconds_in_year / elapsed)
+            // return in basis points: apy_bps = apy * 10000
+            let seconds_in_year: u128 = 31_536_000u128;
+            let apy_bps = pending
+                .saturating_mul(seconds_in_year)
+                .saturating_mul(10_000u128)
+                .saturating_div(p.provider_stake)
+                .saturating_div(elapsed as u128);
+
+            apy_bps
+        }
+
+        /// Paginated queries for pools, policies and claims returning ids. Caller specifies
+        /// `start_index` (1-based) and `limit`.
+        #[ink(message)]
+        pub fn get_pools_paginated(&self, start_index: u64, limit: u64) -> Vec<u64> {
+            let mut out: Vec<u64> = Vec::new();
+            if limit == 0 || start_index == 0 { return out; }
+            let mut fetched = 0u64;
+            let mut i = start_index;
+            while i <= self.pool_count && fetched < limit {
+                if self.pools.get(&i).is_some() {
+                    out.push(i);
+                    fetched += 1;
+                }
+                i += 1;
+            }
+            out
+        }
+
+        #[ink(message)]
+        pub fn get_policies_paginated(&self, start_index: u64, limit: u64) -> Vec<u64> {
+            let mut out: Vec<u64> = Vec::new();
+            if limit == 0 || start_index == 0 { return out; }
+            let mut fetched = 0u64;
+            let mut i = start_index;
+            while i <= self.policy_count && fetched < limit {
+                if self.policies.get(&i).is_some() {
+                    out.push(i);
+                    fetched += 1;
+                }
+                i += 1;
+            }
+            out
+        }
+
+        #[ink(message)]
+        pub fn get_claims_paginated(&self, start_index: u64, limit: u64) -> Vec<u64> {
+            let mut out: Vec<u64> = Vec::new();
+            if limit == 0 || start_index == 0 { return out; }
+            let mut fetched = 0u64;
+            let mut i = start_index;
+            while i <= self.claim_count && fetched < limit {
+                if self.claims.get(&i).is_some() {
+                    out.push(i);
+                    fetched += 1;
+                }
+                i += 1;
+            }
+            out
+        }
+
         /// Get risk assessment for a property
         #[ink(message)]
         pub fn get_risk_assessment(&self, property_id: u64) -> Option<RiskAssessment> {
@@ -2563,6 +3115,8 @@ mod insurance_tests {
     }
 
     fn add_risk_assessment(contract: &mut PropertyInsurance, property_id: u64) {
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        test::set_caller::<DefaultEnvironment>(accounts.alice);
         contract
             .update_risk_assessment(property_id, 75, 80, 85, 90, 86_400 * 365)
             .expect("risk assessment failed");
@@ -3177,7 +3731,7 @@ mod insurance_tests {
             .process_claim(first_claim_id, true, "ipfs://report".into(), String::new())
             .unwrap();
 
-        let cooldown_anchor = test::get_block_timestamp::<DefaultEnvironment>();
+        let cooldown_anchor = 3_000_000u64;
 
         test::set_caller::<DefaultEnvironment>(accounts.bob);
         test::set_block_timestamp::<DefaultEnvironment>(
@@ -3557,6 +4111,75 @@ mod insurance_tests {
             pool.total_provider_stake,
             stake_before.saturating_add(pending)
         );
+    }
+    
+    #[ink::test]
+    fn test_vesting_schedule_and_claims() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        let pool_id = create_pool(&mut contract);
+
+        // configure vesting on pool
+        contract.configure_pool_vesting(pool_id, 10, 100, 500).unwrap();
+
+        // Bob deposits liquidity
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+        test::set_value_transferred::<DefaultEnvironment>(1_000u128);
+        contract.deposit_liquidity(pool_id).unwrap();
+
+        // Generate a premium to create pending rewards
+        add_risk_assessment(&mut contract, 1);
+        let calc = contract
+            .calculate_premium(1, 100u128, CoverageType::Fire)
+            .unwrap();
+
+        test::set_caller::<DefaultEnvironment>(accounts.eve);
+        test::set_value_transferred::<DefaultEnvironment>(calc.annual_premium);
+        contract
+            .create_policy(
+                1,
+                CoverageType::Fire,
+                100u128,
+                pool_id,
+                86_400 * 365,
+                "ipfs://p".into(),
+            )
+            .unwrap();
+
+        // Bob's pending should be > 0
+        let bob = accounts.bob;
+        let pending = contract.get_pending_rewards(pool_id, bob);
+        assert!(pending > 0);
+
+        // Claim rewards -> moved into vesting
+        test::set_caller::<DefaultEnvironment>(bob);
+        let moved = contract.claim_rewards(pool_id).unwrap();
+        assert_eq!(moved, pending);
+
+        let (total_vesting, vested_claimed, vesting_start) = contract.get_vesting_info(pool_id, bob);
+        assert_eq!(total_vesting, pending);
+        assert_eq!(vested_claimed, 0);
+        assert!(vesting_start > 0);
+
+        // Advance time past cliff but halfway through vesting
+        let pool = contract.get_pool(pool_id).unwrap();
+        let half = pool.vesting_duration_seconds / 2;
+        test::set_block_timestamp::<DefaultEnvironment>(vesting_start + pool.vesting_cliff_seconds + half);
+
+        // Claim vested portion
+        let claimed = contract.claim_vested_rewards(pool_id).unwrap();
+        assert!(claimed > 0);
+
+        // Now test early withdrawal penalty: withdraw some principal before full vest
+        // Reset timestamp to now (still within vest)
+        test::set_block_timestamp::<DefaultEnvironment>(vesting_start + pool.vesting_cliff_seconds + 1);
+        // Bob withdraws part of his stake
+        let before_pool = contract.get_pool(pool_id).unwrap();
+        let before_available = before_pool.available_capital;
+        contract.withdraw_liquidity(pool_id, 500u128).unwrap();
+        let after_pool = contract.get_pool(pool_id).unwrap();
+        // Available capital should have increased by penalty amount (>=0)
+        assert!(after_pool.available_capital >= before_available);
     }
 
     #[ink::test]
@@ -4003,9 +4626,12 @@ mod insurance_tests {
                 100_000_000_000u128,
                 pool_id,
                 86400 * 365,
+                "ipfs://test".into(),
             );
-            assert!(policy_result.is_ok());
-            let policy_id = policy_result.unwrap();
+            let policy_id = match policy_result {
+                Ok(id) => id,
+                Err(e) => panic!("create_policy failed: {:?}", e),
+            };
 
             // Submit claim
             let claim_result = contract.submit_claim(
@@ -4065,9 +4691,12 @@ mod insurance_tests {
                 100_000_000_000u128,
                 pool_id,
                 86400 * 365,
+                "ipfs://test".into(),
             );
-            assert!(policy_result.is_ok());
-            let policy_id = policy_result.unwrap();
+            let policy_id = match policy_result {
+                Ok(id) => id,
+                Err(e) => panic!("create_policy failed: {:?}", e),
+            };
 
             // Submit claim
             let claim_result = contract.submit_claim(
@@ -4125,9 +4754,12 @@ mod insurance_tests {
             100_000_000_000u128,
             pool_id,
             86400 * 365,
+            "ipfs://test".into(),
         );
-        assert!(policy_result.is_ok());
-        let policy_id = policy_result.unwrap();
+        let policy_id = match policy_result {
+            Ok(id) => id,
+            Err(e) => panic!("create_policy failed: {:?}", e),
+        };
 
         // Submit one valid claim
         let claim_result = contract.submit_claim(
@@ -4170,7 +4802,7 @@ mod insurance_tests {
         let invalid_result = summary.results.get(1).unwrap();
         assert!(!invalid_result.success);
         assert!(invalid_result.error.is_some());
-        assert_eq!(invalid_result.error.unwrap(), InsuranceError::ClaimNotFound);
+        assert_eq!(invalid_result.error.clone().unwrap(), InsuranceError::ClaimNotFound);
         assert_eq!(invalid_result.claim_id, invalid_claim_id);
     }
 
@@ -4217,9 +4849,12 @@ mod insurance_tests {
             100_000_000_000u128,
             pool_id,
             86400 * 365,
+            "ipfs://test".into(),
         );
-        assert!(policy_result.is_ok());
-        let policy_id = policy_result.unwrap();
+        let policy_id = match policy_result {
+            Ok(id) => id,
+            Err(e) => panic!("create_policy failed: {:?}", e),
+        };
 
         // Submit and approve claim
         let claim_result = contract.submit_claim(
@@ -4254,6 +4889,6 @@ mod insurance_tests {
 
         let result = summary.results.get(0).unwrap();
         assert!(!result.success);
-        assert_eq!(result.error.unwrap(), InsuranceError::ClaimAlreadyProcessed);
+        assert_eq!(result.error.clone().unwrap(), InsuranceError::ClaimAlreadyProcessed);
     }
 }

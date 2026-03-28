@@ -20,6 +20,7 @@ const PAUSE_HISTORY_KEY: Symbol = Symbol::short("PAUSE_HISTORY");
 const MULTI_SIG_CONFIG_KEY: Symbol = Symbol::short("MSIG_CFG");
 const MULTI_SIG_PROPOSAL_KEY: Symbol = Symbol::short("MSIG_PRP");
 const MULTI_SIG_CONFIRMATIONS_KEY: Symbol = Symbol::short("MSIG_CFM");
+const QUEUE_KEY: Symbol = Symbol::short("QUEUE");
 
 // Custom errors
 #[contracterror]
@@ -224,6 +225,20 @@ pub struct Confirmation {
     pub signer: Address,
     pub weight: u32,
     pub confirmed_at: u64,
+}
+
+// Queued proposal record
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedProposal {
+    pub proposal_id: u64,
+    pub queued_at: u64,
+    pub execute_after: u64,
+    pub executor: Option<Address>,
+    pub fast_tracked: bool,
+    pub cancelled: bool,
+    pub cancelled_by: Option<Address>,
+    pub cancelled_at: Option<u64>,
 }
 
 pub struct GovernanceContract;
@@ -1366,6 +1381,161 @@ impl GovernanceContract {
         // Note: This would require token contract integration
 
         Ok(())
+    }
+
+    // Queue a passed proposal for execution with a timelock delay
+    pub fn queue_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<u64, GovernanceError> {
+        let data: GovernanceData = env.storage().instance().get(&DATA_KEY).unwrap_or_panic();
+
+        let proposal_key = (PROPOSAL_KEY, proposal_id);
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if proposal.status != ProposalStatus::Passed {
+            return Err(GovernanceError::NotAuthorized);
+        }
+
+        // Only proposer or admin may queue (prevents arbitrary queuing)
+        if caller != proposal.proposer && caller != data.admin {
+            return Err(GovernanceError::NotAuthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        // Default timelock: use configured or fallback to 2 days
+        let delay = if data.time_lock_enabled {
+            data.time_lock_seconds as u64
+        } else {
+            2 * 86400u64
+        };
+
+        let execute_after = now.saturating_add(delay);
+        proposal.time_lock_expiry = Some(execute_after);
+        env.storage().persistent().set(&proposal_key, &proposal);
+
+        let queued = QueuedProposal {
+            proposal_id,
+            queued_at: now,
+            execute_after,
+            executor: None,
+            fast_tracked: false,
+            cancelled: false,
+            cancelled_by: None,
+            cancelled_at: None,
+        };
+
+        let queue_key = (QUEUE_KEY, proposal_id);
+        env.storage().persistent().set(&queue_key, &queued);
+
+        Ok(execute_after)
+    }
+
+    // Execute a queued proposal after its timelock has expired (or if fast-tracked)
+    pub fn execute_queued_proposal(env: &Env, proposal_id: u64) -> Result<(), GovernanceError> {
+        let queue_key = (QUEUE_KEY, proposal_id);
+        let queued: QueuedProposal = env
+            .storage()
+            .persistent()
+            .get(&queue_key)
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if queued.cancelled {
+            return Err(GovernanceError::NotAuthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        if !queued.fast_tracked && now < queued.execute_after {
+            return Err(GovernanceError::TimeLockNotExpired);
+        }
+
+        // Call existing executor which will mark executed and check time_lock_expiry too
+        Self::execute_proposal(env, proposal_id)?;
+
+        // remove queued entry
+        env.storage().persistent().remove(&queue_key);
+
+        Ok(())
+    }
+
+    // Fast-track a queued proposal (admin or multi-sig)
+    pub fn fast_track_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), GovernanceError> {
+        let data: GovernanceData = env.storage().instance().get(&DATA_KEY).unwrap_or_panic();
+
+        // Only admin or multi-sig signer can fast-track
+        let allowed = caller == data.admin || Self::is_signer(env, &caller, &Self::get_multi_sig_config(env).unwrap_or(MultiSigConfig { signers: Vec::new(env), threshold_weight: 0, enabled: false, configured_at: 0, configured_by: caller.clone() }));
+        if !allowed {
+            return Err(GovernanceError::NotAuthorized);
+        }
+
+        let queue_key = (QUEUE_KEY, proposal_id);
+        let mut queued: QueuedProposal = env
+            .storage()
+            .persistent()
+            .get(&queue_key)
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if queued.cancelled {
+            return Err(GovernanceError::NotAuthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        queued.fast_tracked = true;
+        queued.execute_after = now; // allow immediate execution
+        env.storage().persistent().set(&queue_key, &queued);
+
+        Ok(())
+    }
+
+    // Cancel a queued proposal (proposer, admin, or multi-sig)
+    pub fn cancel_queued_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), GovernanceError> {
+        let queue_key = (QUEUE_KEY, proposal_id);
+        let mut queued: QueuedProposal = env
+            .storage()
+            .persistent()
+            .get(&queue_key)
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        let proposal_key = (PROPOSAL_KEY, proposal_id);
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        let data: GovernanceData = env.storage().instance().get(&DATA_KEY).unwrap_or_panic();
+
+        // Only proposer, admin or multi-sig signer allowed to cancel
+        let mut allowed = false;
+        if caller == proposal.proposer || caller == data.admin {
+            allowed = true;
+        } else if let Some(cfg) = env.storage().instance().get(&MULTI_SIG_CONFIG_KEY) {
+            // check signer
+            allowed = Self::is_signer(env, &caller, &cfg);
+        }
+
+        if !allowed {
+            return Err(GovernanceError::NotAuthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        queued.cancelled = true;
+        queued.cancelled_by = Some(caller.clone());
+        queued.cancelled_at = Some(now);
+        env.storage().persistent().set(&queue_key, &queued);
+
+        // Clear proposal time_lock_expiry so it won't be executed accidentally
+        proposal.time_lock_expiry = None;
+        env.storage().persistent().set(&proposal_key, &proposal);
+
+        Ok(())
+    }
+
+    // Get queue status for a proposal (if queued)
+    pub fn get_queue_status(env: &Env, proposal_id: u64) -> Option<QueuedProposal> {
+        let queue_key = (QUEUE_KEY, proposal_id);
+        env.storage().persistent().get(&queue_key)
     }
 
     // Helper function to generate proposal hash
