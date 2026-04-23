@@ -72,6 +72,39 @@ mod propchain_oracle {
 
         /// AI valuation contract address
         ai_valuation_contract: Option<AccountId>,
+
+        /// Risk pool address — receives slashed funds
+        pub risk_pool: Option<AccountId>,
+    }
+
+    /// Emitted when an oracle source is slashed and funds transferred to the risk pool
+    #[ink(event)]
+    pub struct SourceSlashed {
+        #[ink(topic)]
+        source_id: String,
+        penalty: u128,
+        risk_pool: AccountId,
+    }
+
+    /// Emitted for monitoring: large valuation movements
+    #[ink(event)]
+    pub struct LargeValuationMovement {
+        #[ink(topic)]
+        property_id: u64,
+        old_valuation: u128,
+        new_valuation: u128,
+        /// Change in basis points (1 bp = 0.01%)
+        change_bps: u128,
+        severity: u8, // 1=info, 2=warn, 3=critical
+    }
+
+    /// Emitted for monitoring: source reputation dropped below threshold
+    #[ink(event)]
+    pub struct SourceReputationAlert {
+        #[ink(topic)]
+        source_id: String,
+        reputation: u32,
+        severity: u8,
     }
 
     /// Events emitted by the oracle
@@ -124,7 +157,16 @@ mod propchain_oracle {
                 pending_requests: Mapping::default(),
                 request_id_counter: 0,
                 ai_valuation_contract: None,
+                risk_pool: None,
             }
+        }
+
+        /// Set the risk pool address that receives slashed funds (admin only)
+        #[ink(message)]
+        pub fn set_risk_pool(&mut self, risk_pool: AccountId) -> Result<(), OracleError> {
+            self.ensure_admin()?;
+            self.risk_pool = Some(risk_pool);
+            Ok(())
         }
 
         /// Get property valuation from multiple sources with aggregation
@@ -181,6 +223,28 @@ mod propchain_oracle {
 
             // Check price alerts
             self.check_price_alerts(property_id, valuation.valuation)?;
+
+            // Monitoring: emit structured event for large movements
+            if let Some(prev) = self.property_valuations.get(&property_id) {
+                if prev.valuation > 0 {
+                    let change_bps = valuation
+                        .valuation
+                        .abs_diff(prev.valuation)
+                        .saturating_mul(10_000)
+                        / prev.valuation;
+                    if change_bps >= 500 {
+                        // >= 5% movement
+                        let severity: u8 = if change_bps >= 2000 { 3 } else if change_bps >= 1000 { 2 } else { 1 };
+                        self.env().emit_event(LargeValuationMovement {
+                            property_id,
+                            old_valuation: prev.valuation,
+                            new_valuation: valuation.valuation,
+                            change_bps,
+                            severity,
+                        });
+                    }
+                }
+            }
 
             // Emit event
             self.env().emit_event(ValuationUpdated {
@@ -277,6 +341,21 @@ mod propchain_oracle {
 
             self.source_reputations.insert(&source_id, &new_rep);
 
+            // Monitoring: alert when reputation crosses warning thresholds
+            if new_rep < 200 {
+                self.env().emit_event(SourceReputationAlert {
+                    source_id: source_id.clone(),
+                    reputation: new_rep,
+                    severity: 3,
+                });
+            } else if new_rep < 400 {
+                self.env().emit_event(SourceReputationAlert {
+                    source_id: source_id.clone(),
+                    reputation: new_rep,
+                    severity: 2,
+                });
+            }
+
             // Auto-deactivate source if reputation falls too low
             if new_rep < 200 {
                 if let Some(mut source) = self.oracle_sources.get(&source_id) {
@@ -289,7 +368,8 @@ mod propchain_oracle {
             Ok(())
         }
 
-        /// Slash an oracle source for providing bad data (admin only)
+        /// Slash an oracle source for providing bad data (admin only).
+        /// Slashed funds are transferred to the configured risk pool.
         #[ink(message)]
         pub fn slash_source(
             &mut self,
@@ -299,8 +379,23 @@ mod propchain_oracle {
             self.ensure_admin()?;
 
             let current_stake = self.source_stakes.get(&source_id).unwrap_or(0);
+            let actual_penalty = penalty.min(current_stake);
             self.source_stakes
-                .insert(&source_id, &current_stake.saturating_sub(penalty));
+                .insert(&source_id, &current_stake.saturating_sub(actual_penalty));
+
+            // Transfer slashed funds to risk pool
+            if actual_penalty > 0 {
+                if let Some(pool) = self.risk_pool {
+                    self.env()
+                        .transfer(pool, actual_penalty)
+                        .map_err(|_| OracleError::InvalidValuation)?;
+                    self.env().emit_event(SourceSlashed {
+                        source_id: source_id.clone(),
+                        penalty: actual_penalty,
+                        risk_pool: pool,
+                    });
+                }
+            }
 
             // Also hit the reputation hard
             self.update_source_reputation(source_id, false)?;
