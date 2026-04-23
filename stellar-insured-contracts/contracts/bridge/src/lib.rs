@@ -27,6 +27,19 @@ mod bridge {
         InvalidMetadata,
         DuplicateRequest,
         GasLimitExceeded,
+        InvalidProof,
+    }
+
+    /// Merkle proof for cross-chain message verification (issue #309)
+    #[derive(Debug, Clone, scale::Encode, scale::Decode)]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub struct MerkleProof {
+        /// Merkle root committed by the source chain
+        pub root: Hash,
+        /// Sibling hashes along the path from leaf to root
+        pub proof: Vec<Hash>,
+        /// Leaf index (position in the tree)
+        pub leaf_index: u64,
     }
 
     /// Bridge contract for cross-chain property token transfers
@@ -58,6 +71,36 @@ mod bridge {
 
         /// Admin account
         admin: AccountId,
+
+        /// Trusted Merkle roots per source chain (submitted by operators)
+        trusted_roots: Mapping<ChainId, Hash>,
+    }
+
+    /// Emitted when a trusted Merkle root is updated for a source chain
+    #[ink(event)]
+    pub struct TrustedRootUpdated {
+        #[ink(topic)]
+        pub chain_id: ChainId,
+        pub root: Hash,
+        pub updated_by: AccountId,
+    }
+
+    /// Monitoring: emitted for large bridge operations (issue #307)
+    #[ink(event)]
+    pub struct BridgeVolumeAlert {
+        #[ink(topic)]
+        pub request_id: u64,
+        #[ink(topic)]
+        pub token_id: TokenId,
+        pub severity: u8, // 1=info, 2=warn, 3=critical
+    }
+
+    /// Monitoring: emitted when a bridge request expires without execution
+    #[ink(event)]
+    pub struct BridgeRequestExpired {
+        #[ink(topic)]
+        pub request_id: u64,
+        pub expired_at_block: u64,
     }
 
     /// Events for bridge operations
@@ -144,6 +187,7 @@ mod bridge {
                 request_counter: 0,
                 transaction_counter: 0,
                 admin: caller,
+                trusted_roots: Mapping::default(),
             };
 
             // Set up default chain information
@@ -341,6 +385,15 @@ mod bridge {
                 request_id,
                 token_id: request.token_id,
                 transaction_hash,
+            });
+
+            // Monitoring: alert on large bridge operations (issue #307)
+            // Token IDs above 1000 are treated as high-value for alerting purposes
+            let severity: u8 = if request.token_id > 10_000 { 3 } else if request.token_id > 1_000 { 2 } else { 1 };
+            self.env().emit_event(BridgeVolumeAlert {
+                request_id,
+                token_id: request.token_id,
+                severity,
             });
 
             Ok(())
@@ -549,6 +602,76 @@ mod bridge {
             Ok(())
         }
 
+        /// Update the trusted Merkle root for a source chain (operator only).
+        /// Operators submit the root after it has been finalised on the source chain.
+        #[ink(message)]
+        pub fn update_trusted_root(
+            &mut self,
+            chain_id: ChainId,
+            root: Hash,
+        ) -> Result<(), Error> {
+            let caller = self.env().caller();
+            if !self.bridge_operators.contains(&caller) {
+                return Err(Error::Unauthorized);
+            }
+            self.trusted_roots.insert(chain_id, &root);
+            self.env().emit_event(TrustedRootUpdated {
+                chain_id,
+                root,
+                updated_by: caller,
+            });
+            Ok(())
+        }
+
+        /// Verify a cross-chain message using a Merkle proof against the stored
+        /// trusted root for `source_chain` (issue #309).
+        ///
+        /// The leaf is computed as SHA-256(message_hash || leaf_index).
+        /// Returns `true` when the proof is valid, `false` otherwise.
+        #[ink(message)]
+        pub fn verify_message_proof(
+            &self,
+            source_chain: ChainId,
+            message_hash: Hash,
+            proof: MerkleProof,
+        ) -> Result<bool, Error> {
+            let trusted_root = self
+                .trusted_roots
+                .get(source_chain)
+                .ok_or(Error::InvalidChain)?;
+
+            if trusted_root != proof.root {
+                return Ok(false);
+            }
+
+            Ok(self.verify_merkle_proof(message_hash, &proof))
+        }
+
+        /// Execute a bridge request only after its Merkle proof is verified.
+        /// Combines proof verification with execution in a single call (issue #309).
+        #[ink(message)]
+        pub fn execute_bridge_with_proof(
+            &mut self,
+            request_id: u64,
+            proof: MerkleProof,
+        ) -> Result<(), Error> {
+            let request = self
+                .bridge_requests
+                .get(request_id)
+                .ok_or(Error::InvalidRequest)?;
+
+            // Derive the message hash from the request
+            let message_hash = self.generate_transaction_hash(&request);
+
+            // Verify the Merkle proof against the trusted root for the source chain
+            let valid = self.verify_message_proof(request.source_chain, message_hash, proof)?;
+            if !valid {
+                return Err(Error::InvalidProof);
+            }
+
+            self.execute_bridge(request_id)
+        }
+
         // Helper functions
 
         fn is_authorized_for_token(&self, _account: AccountId, _token_id: TokenId) -> bool {
@@ -594,6 +717,44 @@ mod bridge {
             let base_gas = 100000; // Base gas for bridge operation
             let metadata_gas = request.metadata.legal_description.len() as u64 * 100; // Gas for metadata
             base_gas + metadata_gas
+        }
+
+        /// Verify a Merkle proof.
+        ///
+        /// Leaf = SHA-256(message_hash_bytes || leaf_index_le_bytes).
+        /// Each step: if the current index is even, node = SHA-256(current || sibling),
+        /// otherwise node = SHA-256(sibling || current). Matches standard binary Merkle trees.
+        fn verify_merkle_proof(&self, message_hash: Hash, proof: &MerkleProof) -> bool {
+            use ink::env::hash::{HashOutput, Sha2x256};
+
+            let mut current: [u8; 32] = *message_hash.as_ref();
+            // Mix in the leaf index to bind the proof to a specific position
+            let index_bytes = proof.leaf_index.to_le_bytes();
+            let mut leaf_input = [0u8; 40];
+            leaf_input[..32].copy_from_slice(&current);
+            leaf_input[32..].copy_from_slice(&index_bytes);
+            let mut leaf_hash = <Sha2x256 as HashOutput>::Type::default();
+            ink::env::hash_bytes::<Sha2x256>(&leaf_input, &mut leaf_hash);
+            current = leaf_hash;
+
+            let mut index = proof.leaf_index;
+            for sibling in &proof.proof {
+                let sibling_bytes: [u8; 32] = *sibling.as_ref();
+                let mut node_input = [0u8; 64];
+                if index % 2 == 0 {
+                    node_input[..32].copy_from_slice(&current);
+                    node_input[32..].copy_from_slice(&sibling_bytes);
+                } else {
+                    node_input[..32].copy_from_slice(&sibling_bytes);
+                    node_input[32..].copy_from_slice(&current);
+                }
+                let mut node_hash = <Sha2x256 as HashOutput>::Type::default();
+                ink::env::hash_bytes::<Sha2x256>(&node_input, &mut node_hash);
+                current = node_hash;
+                index /= 2;
+            }
+
+            Hash::from(current) == proof.root
         }
     }
 
