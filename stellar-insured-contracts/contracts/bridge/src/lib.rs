@@ -564,8 +564,11 @@ mod bridge {
         }
 
         fn generate_transaction_hash(&self, request: &MultisigBridgeRequest) -> Hash {
-            // Generate a unique transaction hash for the bridge request
+            // Generate a cryptographic SHA-256 hash of the bridge request to
+            // ensure collision resistance and prevent trivial forgery or replay.
             use scale::Encode;
+            use ink::env::hash::{Sha2x256, HashOutput};
+
             let data = (
                 request.request_id,
                 request.token_id,
@@ -575,12 +578,15 @@ mod bridge {
                 request.recipient,
                 self.env().block_timestamp(),
             );
+
             let encoded_data = data.encode();
-            // Simple hash: use first 32 bytes of encoded data
-            let mut hash_bytes = [0u8; 32];
-            let len = encoded_data.len().min(32);
-            hash_bytes[..len].copy_from_slice(&encoded_data[..len]);
-            Hash::from(hash_bytes)
+
+            // Compute SHA-256 over the encoded bytes
+            let mut output: <Sha2x256 as HashOutput>::Type = <Sha2x256 as HashOutput>::Type::default();
+            ink::env::hash_bytes::<Sha2x256>(&encoded_data, &mut output);
+
+            // Convert the hash output to the contract `Hash` type
+            Hash::from(output)
         }
 
         fn estimate_gas_usage(&self, request: &MultisigBridgeRequest) -> u64 {

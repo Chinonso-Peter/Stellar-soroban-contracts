@@ -564,8 +564,16 @@ mod propchain_oracle {
 
             for price_data in &filtered_prices {
                 let weight = self.get_source_weight(&price_data.source)?;
-                total_weighted_price += price_data.price * weight as u128;
-                total_weight += weight;
+                let weighted_price = price_data
+                    .price
+                    .checked_mul(weight as u128)
+                    .ok_or(OracleError::InvalidValuation)?;
+                total_weighted_price = total_weighted_price
+                    .checked_add(weighted_price)
+                    .ok_or(OracleError::InvalidValuation)?;
+                total_weight = total_weight
+                    .checked_add(weight)
+                    .ok_or(OracleError::InvalidParameters)?;
             }
 
             if total_weight == 0 {
@@ -1054,6 +1062,51 @@ mod oracle_tests {
         let aggregated = result.expect("Price aggregation should succeed in test");
         // Should be close to the weighted average of 100, 105, 98 ≈ 101
         assert!((98..=105).contains(&aggregated));
+    }
+
+    #[ink::test]
+    fn test_aggregate_prices_rejects_overflow() {
+        let mut oracle = setup_oracle();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+
+        oracle
+            .add_oracle_source(OracleSource {
+                id: "heavy".to_string(),
+                source_type: OracleSourceType::Manual,
+                address: accounts.bob,
+                is_active: true,
+                weight: 100,
+                last_updated: ink::env::block_timestamp::<DefaultEnvironment>(),
+            })
+            .expect("Oracle source registration should succeed in test");
+        oracle
+            .add_oracle_source(OracleSource {
+                id: "light".to_string(),
+                source_type: OracleSourceType::Manual,
+                address: accounts.bob,
+                is_active: true,
+                weight: 1,
+                last_updated: ink::env::block_timestamp::<DefaultEnvironment>(),
+            })
+            .expect("Oracle source registration should succeed in test");
+
+        let prices = vec![
+            PriceData {
+                price: u128::MAX,
+                timestamp: ink::env::block_timestamp::<DefaultEnvironment>(),
+                source: "heavy".to_string(),
+            },
+            PriceData {
+                price: 1,
+                timestamp: ink::env::block_timestamp::<DefaultEnvironment>(),
+                source: "light".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            oracle.aggregate_prices(&prices),
+            Err(OracleError::InvalidValuation)
+        );
     }
 
     #[ink::test]
