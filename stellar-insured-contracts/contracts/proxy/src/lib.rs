@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(dead_code)]
 
+use propchain_traits::{UpgradeError, Upgradeable};
+
 #[ink::contract]
 mod propchain_proxy {
 
@@ -18,7 +20,7 @@ mod propchain_proxy {
 
     #[ink(storage)]
     pub struct TransparentProxy {
-        /// The address of the current implementation contract.
+        /// The code hash for the current implementation.
         code_hash: Hash,
         /// The address of the proxy admin.
         admin: AccountId,
@@ -46,14 +48,6 @@ mod propchain_proxy {
         }
 
         #[ink(message)]
-        pub fn upgrade_to(&mut self, new_code_hash: Hash) -> Result<(), Error> {
-            self.ensure_admin()?;
-            self.code_hash = new_code_hash;
-            self.env().emit_event(Upgraded { new_code_hash });
-            Ok(())
-        }
-
-        #[ink(message)]
         pub fn change_admin(&mut self, new_admin: AccountId) -> Result<(), Error> {
             self.ensure_admin()?;
             self.admin = new_admin;
@@ -71,11 +65,76 @@ mod propchain_proxy {
             self.admin
         }
 
+        fn upgrade_code_hash(&mut self, new_code_hash: Hash) -> Result<(), Error> {
+            self.ensure_admin()?;
+            ink::env::set_code_hash(&new_code_hash).map_err(|_| Error::UpgradeFailed)?;
+            self.code_hash = new_code_hash;
+            self.env().emit_event(Upgraded { new_code_hash });
+            Ok(())
+        }
+
         fn ensure_admin(&self) -> Result<(), Error> {
             if self.env().caller() != self.admin {
                 return Err(Error::Unauthorized);
             }
             Ok(())
+        }
+    }
+
+    impl Upgradeable for TransparentProxy {
+        #[ink(message)]
+        fn upgrade_to(&mut self, new_code_hash: Hash) -> Result<(), UpgradeError> {
+            self.upgrade_code_hash(new_code_hash)
+                .map_err(|_| UpgradeError::UpgradeFailed)
+        }
+
+        #[ink(message)]
+        fn change_admin(&mut self, new_admin: AccountId) -> Result<(), UpgradeError> {
+            self.change_admin(new_admin)
+                .map_err(|err| match err {
+                    Error::Unauthorized => UpgradeError::Unauthorized,
+                    Error::UpgradeFailed => UpgradeError::UpgradeFailed,
+                })
+        }
+
+        #[ink(message)]
+        fn admin(&self) -> AccountId {
+            self.admin
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use ink::env::test;
+        use ink::env::DefaultEnvironment;
+
+        fn default_accounts() -> ink::env::test::DefaultAccounts<DefaultEnvironment> {
+            ink::env::test::default_accounts::<DefaultEnvironment>()
+                .expect("Failed to get default accounts")
+        }
+
+        #[ink::test]
+        fn admin_can_upgrade_stores_code_hash() {
+            let accounts = default_accounts();
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+
+            let mut proxy = TransparentProxy::new(Hash::default());
+            let new_hash = Hash::from([1u8; 32]);
+            assert_eq!(proxy.upgrade_to(new_hash), Ok(()));
+            assert_eq!(proxy.code_hash(), new_hash);
+        }
+
+        #[ink::test]
+        fn non_admin_cannot_upgrade() {
+            let accounts = default_accounts();
+            test::set_caller::<DefaultEnvironment>(accounts.alice);
+
+            let mut proxy = TransparentProxy::new(Hash::default());
+            test::set_caller::<DefaultEnvironment>(accounts.bob);
+
+            let new_hash = Hash::from([1u8; 32]);
+            assert_eq!(proxy.upgrade_to(new_hash), Err(UpgradeError::Unauthorized));
         }
     }
 }

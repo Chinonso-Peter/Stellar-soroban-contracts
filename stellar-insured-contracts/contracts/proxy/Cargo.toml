@@ -8,6 +8,7 @@ edition = "2021"
 ink = { workspace = true, features = ["std"] }
 scale = { workspace = true, features = ["std"] }
 scale-info = { workspace = true, features = ["std"] }
+propchain-traits = { path = "../traits" }
 
 [lib]
 name = "propchain_proxy"
