@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use ink::prelude::string::String;
-use ink::primitives::AccountId;
+use ink::primitives::{AccountId, Hash};
 
 /// Error types for the Property Valuation Oracle
 #[derive(Debug, PartialEq, Eq, scale::Encode, scale::Decode)]
@@ -648,6 +648,29 @@ pub struct BridgeConfig {
     pub gas_limit_per_bridge: u64,
     pub emergency_pause: bool,
     pub metadata_preservation: bool,
+}
+
+/// Upgradeability interface for proxy and self-upgrade contracts.
+#[derive(Debug, PartialEq, Eq, scale::Encode, scale::Decode)]
+#[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+pub enum UpgradeError {
+    Unauthorized,
+    UpgradeFailed,
+}
+
+#[ink::trait_definition]
+pub trait Upgradeable {
+    /// Upgrade the contract code hash while preserving storage.
+    #[ink(message)]
+    fn upgrade_to(&mut self, new_code_hash: Hash) -> Result<(), UpgradeError>;
+
+    /// Change the admin authorized to trigger upgrades.
+    #[ink(message)]
+    fn change_admin(&mut self, new_admin: AccountId) -> Result<(), UpgradeError>;
+
+    /// Get the current upgrade admin.
+    #[ink(message)]
+    fn admin(&self) -> AccountId;
 }
 
 /// Chain-specific bridge information

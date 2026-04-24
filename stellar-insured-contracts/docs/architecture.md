@@ -322,30 +322,31 @@ pub fn get_property_summary(&self, id: PropertyId) -> PropertySummary {
 
 ## Upgrade Architecture
 
-### Proxy Pattern
+### Upgradeable Proxy Pattern
+
+The repository now provides a dedicated upgrade contract and a reusable `Upgradeable` interface in `contracts/traits`. The proxy keeps the admin-controlled code hash for the active implementation and uses on-chain code hash switching to preserve contract storage across upgrades.
 
 ```rust
-#[ink(storage)]
-pub struct ProxyContract {
-    implementation: AccountId,
+#[ink::storage]
+pub struct TransparentProxy {
+    code_hash: Hash,
     admin: AccountId,
 }
 
-impl ProxyContract {
+impl TransparentProxy {
     #[ink(message)]
-    pub fn upgrade(&mut self, new_implementation: AccountId) -> Result<(), Error> {
-        if self.env().caller() != self.admin {
-            return Err(Error::Unauthorized);
-        }
-        self.implementation = new_implementation;
-        self.env().emit_event(Upgraded {
-            old: self.implementation,
-            new: new_implementation,
-        });
+    pub fn upgrade_to(&mut self, new_code_hash: Hash) -> Result<(), UpgradeError> {
+        self.ensure_admin()?;
+        ink::env::set_code_hash(&new_code_hash)
+            .map_err(|_| UpgradeError::UpgradeFailed)?;
+        self.code_hash = new_code_hash;
+        self.env().emit_event(Upgraded { new_code_hash });
         Ok(())
     }
 }
 ```
+
+Contracts should use the `propchain_traits` interface crate for all cross-contract interactions rather than importing another contract's internal storage layout. This keeps implementation details decoupled, enabling independent contract upgrades and preventing tight coupling between contracts.
 
 ### Migration Strategy
 

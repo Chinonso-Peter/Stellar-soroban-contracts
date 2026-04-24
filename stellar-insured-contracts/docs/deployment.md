@@ -190,15 +190,17 @@ cargo contract build --release --output-json > build-info.json
 ### Upgrade Process
 
 ```bash
-# 1. Deploy new version
+# 1. Upload new implementation code
 cargo contract upload --new-version
 
-# 2. Migrate to new contract
-./scripts/migrate-contract.sh $OLD_ADDRESS $NEW_ADDRESS
+# 2. Upgrade the deployed proxy by code hash
+./scripts/upgrade.sh $PROXY_ADDRESS $NEW_LOGIC_WASM
 
-# 3. Verify migration
-./scripts/verify-migration.sh $NEW_ADDRESS
+# 3. Verify the proxy is now pointing to the new implementation
+cargo contract call --contract $PROXY_ADDRESS --message code_hash --suri "$ADMIN_SURI"
 ```
+
+> Note: Use the `propchain_traits::Upgradeable` interface and the `contracts/proxy` upgrade proxy to preserve storage while replacing logic.
 
 ## Troubleshooting
 
