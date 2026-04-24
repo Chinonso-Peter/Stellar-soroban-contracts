@@ -38,44 +38,66 @@ impl TestAccounts {
     }
 }
 
-/// Property metadata fixtures
+/// Canonical fixture values — single source of truth for all test data.
+/// Tests should reference these constants rather than embedding raw literals.
+pub mod fixture_values {
+    pub const MINIMAL_LOCATION: &str = "1 Test Lane";
+    pub const MINIMAL_SIZE: u64 = 1_000;
+    pub const MINIMAL_LEGAL_DESC: &str = "Minimal test parcel";
+    pub const MINIMAL_VALUATION: u128 = 100_000;
+    pub const MINIMAL_DOCS_URL: &str = "ipfs://QmMinimal";
+
+    pub const STANDARD_LOCATION: &str = "42 Fixture Road, Testville, TS 00001";
+    pub const STANDARD_SIZE: u64 = 2_500;
+    pub const STANDARD_LEGAL_DESC: &str = "Lot 1, Block A, Fixture Subdivision";
+    pub const STANDARD_VALUATION: u128 = 500_000;
+    pub const STANDARD_DOCS_URL: &str = "ipfs://QmStandard";
+
+    pub const LARGE_LOCATION: &str = "99 Commerce Blvd, Metro City, TS 99999";
+    pub const LARGE_SIZE: u64 = 10_000;
+    pub const LARGE_LEGAL_DESC: &str = "Large commercial parcel — fixture data";
+    pub const LARGE_VALUATION: u128 = 5_000_000;
+    pub const LARGE_DOCS_URL: &str = "ipfs://QmLarge";
+}
+
+/// Property metadata fixtures — all values sourced from `fixture_values`.
 pub struct PropertyMetadataFixtures;
 
 impl PropertyMetadataFixtures {
-    /// Create a minimal valid property metadata
+    /// Create a minimal valid property metadata.
     pub fn minimal() -> PropertyMetadata {
         PropertyMetadata {
-            location: "123 Main St".to_string(),
-            size: 1000,
-            legal_description: "Test property".to_string(),
-            valuation: 100_000,
-            documents_url: "ipfs://test".to_string(),
+            location: fixture_values::MINIMAL_LOCATION.to_string(),
+            size: fixture_values::MINIMAL_SIZE,
+            legal_description: fixture_values::MINIMAL_LEGAL_DESC.to_string(),
+            valuation: fixture_values::MINIMAL_VALUATION,
+            documents_url: fixture_values::MINIMAL_DOCS_URL.to_string(),
         }
     }
 
-    /// Create a standard property metadata
+    /// Create a standard property metadata.
     pub fn standard() -> PropertyMetadata {
         PropertyMetadata {
-            location: "123 Main St, City, State 12345".to_string(),
-            size: 2500,
-            legal_description: "Lot 123, Block 4, Subdivision XYZ".to_string(),
-            valuation: 500_000,
-            documents_url: "https://ipfs.io/ipfs/QmTest".to_string(),
+            location: fixture_values::STANDARD_LOCATION.to_string(),
+            size: fixture_values::STANDARD_SIZE,
+            legal_description: fixture_values::STANDARD_LEGAL_DESC.to_string(),
+            valuation: fixture_values::STANDARD_VALUATION,
+            documents_url: fixture_values::STANDARD_DOCS_URL.to_string(),
         }
     }
 
-    /// Create a large property metadata
+    /// Create a large-property metadata.
     pub fn large() -> PropertyMetadata {
         PropertyMetadata {
-            location: "456 Oak Avenue, Metropolitan City, State 67890".to_string(),
-            size: 10_000,
-            legal_description: "Large commercial property with extensive legal description".to_string(),
-            valuation: 5_000_000,
-            documents_url: "https://ipfs.io/ipfs/QmLarge".to_string(),
+            location: fixture_values::LARGE_LOCATION.to_string(),
+            size: fixture_values::LARGE_SIZE,
+            legal_description: fixture_values::LARGE_LEGAL_DESC.to_string(),
+            valuation: fixture_values::LARGE_VALUATION,
+            documents_url: fixture_values::LARGE_DOCS_URL.to_string(),
         }
     }
 
-    /// Create property metadata with custom values
+    /// Create property metadata with fully custom values.
     pub fn custom(
         location: String,
         size: u64,
@@ -92,16 +114,16 @@ impl PropertyMetadataFixtures {
         }
     }
 
-    /// Create property metadata with edge case values
+    /// Create property metadata covering boundary / edge-case values.
     pub fn edge_cases() -> Vec<PropertyMetadata> {
         vec![
-            // Minimum values
+            // Minimum non-zero values
             PropertyMetadata {
                 location: "A".to_string(),
                 size: 1,
                 legal_description: "X".to_string(),
                 valuation: 1,
-                documents_url: "ipfs://min".to_string(),
+                documents_url: "ipfs://QmEdgeMin".to_string(),
             },
             // Maximum reasonable values
             PropertyMetadata {
@@ -109,15 +131,15 @@ impl PropertyMetadataFixtures {
                 size: u64::MAX,
                 legal_description: "X".repeat(5000),
                 valuation: u128::MAX,
-                documents_url: "ipfs://max".to_string(),
+                documents_url: "ipfs://QmEdgeMax".to_string(),
             },
-            // Special characters
+            // Unicode / special characters
             PropertyMetadata {
-                location: "123 Main St, 城市, État 12345".to_string(),
-                size: 1000,
-                legal_description: "Test with émojis 🏠 and unicode".to_string(),
-                valuation: 100_000,
-                documents_url: "ipfs://special".to_string(),
+                location: "1 Rue de la Paix, 城市, État 00001".to_string(),
+                size: fixture_values::MINIMAL_SIZE,
+                legal_description: "Parcel with unicode 🏠 characters".to_string(),
+                valuation: fixture_values::MINIMAL_VALUATION,
+                documents_url: "ipfs://QmEdgeUnicode".to_string(),
             },
         ]
     }
