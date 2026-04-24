@@ -158,7 +158,20 @@ mod bridge {
             default_timeout: u64,
             gas_limit: u64,
             property_token_contract: AccountId,
-        ) -> Self {
+        ) -> Result<Self, Error> {
+            if supported_chains.is_empty() {
+                return Err(Error::InvalidRequest);
+            }
+            if min_signatures == 0 || min_signatures > max_signatures {
+                return Err(Error::InsufficientSignatures);
+            }
+            if gas_limit == 0 {
+                return Err(Error::GasLimitExceeded);
+            }
+            if default_timeout == 0 {
+                return Err(Error::InvalidRequest);
+            }
+
             let caller = Self::env().caller();
             let config = BridgeConfig {
                 supported_chains: supported_chains.clone(),
@@ -199,7 +212,7 @@ mod bridge {
                 bridge.chain_info.insert(chain_id, &chain_info);
             }
 
-            bridge
+            Ok(bridge)
         }
 
         /// Initiates a bridge request with multi-signature requirement
@@ -774,9 +787,13 @@ mod bridge {
         }
 
         fn estimate_gas_usage(&self, request: &MultisigBridgeRequest) -> u64 {
-            // Estimate gas usage based on request complexity
-            let base_gas = 100000; // Base gas for bridge operation
-            let metadata_gas = request.metadata.legal_description.len() as u64 * 100; // Gas for metadata
+            let base_gas = self.config.gas_limit_per_bridge;
+            let per_byte = self
+                .chain_info
+                .get(request.destination_chain)
+                .map(|c| c.gas_multiplier as u64)
+                .unwrap_or(100);
+            let metadata_gas = request.metadata.legal_description.len() as u64 * per_byte / 100;
             base_gas + metadata_gas
         }
 
@@ -881,6 +898,7 @@ mod bridge {
             // path is covered by integration / e2e tests.
             let dummy_token_contract = AccountId::from([0x01u8; 32]);
             PropertyBridge::new(supported_chains, 2, 5, 100, 500000, dummy_token_contract)
+                .expect("valid constructor args")
         }
 
         #[ink::test]
