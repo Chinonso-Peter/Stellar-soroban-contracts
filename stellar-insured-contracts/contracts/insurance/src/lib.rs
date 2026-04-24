@@ -58,6 +58,9 @@ mod propchain_insurance {
         ZeroAmount,
         InsufficientStake,
         InsufficientPoolLiquidity,
+        // Time-lock errors (#301)
+        TimeLockPending,
+        TimeLockNotReady,
     }
 
     /// Fixed-point precision for [`RiskPool::accumulated_reward_per_share`] (1e18).
@@ -481,6 +484,8 @@ mod propchain_insurance {
 
         // Claim cooldown: property_id -> last_claim_timestamp
         claim_cooldowns: Mapping<u64, u64>,
+        // Rate limiting: caller -> last_submit_claim_timestamp (#300)
+        caller_last_claim: Mapping<AccountId, u64>,
         
 
         // Evidence tracking
@@ -504,6 +509,14 @@ mod propchain_insurance {
         
         // Emergency pause mechanism
         is_paused: bool,
+        // Time-lock for admin operations (#301)
+        // Stores the earliest timestamp at which a pending admin action may execute.
+        // None means no action is pending.
+        pending_pause_after: Option<u64>,
+        pending_admin: Option<AccountId>,
+        pending_admin_after: Option<u64>,
+        /// Delay in seconds before a proposed admin action takes effect (default 86400 = 24 h)
+        admin_timelock_delay: u64,
         
         // Fee tracking
         total_platform_fees_collected: u128,
@@ -773,6 +786,34 @@ mod propchain_insurance {
         timestamp: u64,
     }
 
+    /// Emitted when a pause is proposed; executes after time-lock delay (#301)
+    #[ink(event)]
+    pub struct PauseProposed {
+        #[ink(topic)]
+        proposed_by: AccountId,
+        earliest_execution: u64,
+    }
+
+    /// Emitted when a new admin is proposed; executes after time-lock delay (#301)
+    #[ink(event)]
+    pub struct AdminProposed {
+        #[ink(topic)]
+        proposed_by: AccountId,
+        #[ink(topic)]
+        new_admin: AccountId,
+        earliest_execution: u64,
+    }
+
+    /// Emitted when a pending admin change is executed (#301)
+    #[ink(event)]
+    pub struct AdminChanged {
+        #[ink(topic)]
+        old_admin: AccountId,
+        #[ink(topic)]
+        new_admin: AccountId,
+        timestamp: u64,
+    }
+
     // =========================================================================
     // IMPLEMENTATION
     // =========================================================================
@@ -805,6 +846,7 @@ mod propchain_insurance {
                 authorized_oracles: Mapping::default(),
                 authorized_assessors: Mapping::default(),
                 claim_cooldowns: Mapping::default(),
+                caller_last_claim: Mapping::default(),
                 evidence_count: 0,
                 evidence_items: Mapping::default(),
                 claim_evidence: Mapping::default(),
@@ -816,6 +858,10 @@ mod propchain_insurance {
                 arbiter: None,                     // #134 – falls back to admin
                 used_evidence_nonces: Mapping::default(),
                 is_paused: false,
+                pending_pause_after: None,
+                pending_admin: None,
+                pending_admin_after: None,
+                admin_timelock_delay: 86_400, // 24 hours
                 total_platform_fees_collected: 0,
                 min_premium_amount: 1_000_000,     // Minimum premium (adjust based on token decimals)
                 oracle_contract: None,
@@ -1821,6 +1867,12 @@ mod propchain_insurance {
                 return Err(InsuranceError::CooldownPeriodActive);
             }
 
+            // Per-caller rate limit: max 1 submission per cooldown window (#300)
+            let caller_last = self.caller_last_claim.get(&caller).unwrap_or(0);
+            if now.saturating_sub(caller_last) < self.claim_cooldown_period {
+                return Err(InsuranceError::CooldownPeriodActive);
+            }
+
             let claim_id = self.claim_count + 1;
             self.claim_count = claim_id;
             
@@ -1888,6 +1940,9 @@ mod propchain_insurance {
 
             policy.claims_count += 1;
             self.policies.insert(&policy_id, &policy);
+
+            // Record per-caller timestamp for rate limiting (#300)
+            self.caller_last_claim.insert(&caller, &now);
 
             self.env().emit_event(ClaimSubmitted {
                 claim_id,
@@ -2773,7 +2828,50 @@ mod propchain_insurance {
             self.claims.get(&claim_id)
         }
         
-        /// Emergency pause all state-changing operations (admin only)
+        /// Step 1 of 2: propose pausing the contract.
+        /// The pause will only take effect after `admin_timelock_delay` seconds
+        /// have elapsed and `execute_pause` is called (#301).
+        #[ink(message)]
+        pub fn propose_pause(&mut self) -> Result<(), InsuranceError> {
+            self.ensure_admin()?;
+            if self.is_paused {
+                return Err(InsuranceError::InvalidParameters);
+            }
+            if self.pending_pause_after.is_some() {
+                return Err(InsuranceError::TimeLockPending);
+            }
+            let earliest = self.env().block_timestamp()
+                .saturating_add(self.admin_timelock_delay);
+            self.pending_pause_after = Some(earliest);
+            self.env().emit_event(PauseProposed {
+                proposed_by: self.env().caller(),
+                earliest_execution: earliest,
+            });
+            Ok(())
+        }
+
+        /// Step 2 of 2: execute a previously proposed pause after the time-lock
+        /// delay has elapsed (#301).
+        #[ink(message)]
+        pub fn execute_pause(&mut self) -> Result<(), InsuranceError> {
+            self.ensure_admin()?;
+            let earliest = self.pending_pause_after
+                .ok_or(InsuranceError::InvalidParameters)?;
+            if self.env().block_timestamp() < earliest {
+                return Err(InsuranceError::TimeLockNotReady);
+            }
+            self.pending_pause_after = None;
+            self.is_paused = true;
+            self.env().emit_event(ContractPaused {
+                paused_by: self.env().caller(),
+                timestamp: self.env().block_timestamp(),
+            });
+            Ok(())
+        }
+
+        /// Convenience alias kept for backward-compatibility; immediately pauses
+        /// without a time-lock (retained for emergency use by admin).
+        /// For non-emergency use, prefer `propose_pause` + `execute_pause`.
         #[ink(message)]
         pub fn pause(&mut self) -> Result<(), InsuranceError> {
             self.ensure_admin()?;
@@ -2807,6 +2905,60 @@ mod propchain_insurance {
         #[ink(message)]
         pub fn is_contract_paused(&self) -> bool {
             self.is_paused
+        }
+
+        /// Step 1 of 2: propose transferring admin rights to `new_admin`.
+        /// The change takes effect only after `admin_timelock_delay` seconds
+        /// and a call to `execute_set_admin` (#301).
+        #[ink(message)]
+        pub fn propose_set_admin(&mut self, new_admin: AccountId) -> Result<(), InsuranceError> {
+            self.ensure_admin()?;
+            if self.pending_admin_after.is_some() {
+                return Err(InsuranceError::TimeLockPending);
+            }
+            let earliest = self.env().block_timestamp()
+                .saturating_add(self.admin_timelock_delay);
+            self.pending_admin = Some(new_admin);
+            self.pending_admin_after = Some(earliest);
+            self.env().emit_event(AdminProposed {
+                proposed_by: self.env().caller(),
+                new_admin,
+                earliest_execution: earliest,
+            });
+            Ok(())
+        }
+
+        /// Step 2 of 2: execute a previously proposed admin transfer after the
+        /// time-lock delay has elapsed (#301).
+        #[ink(message)]
+        pub fn execute_set_admin(&mut self) -> Result<(), InsuranceError> {
+            self.ensure_admin()?;
+            let earliest = self.pending_admin_after
+                .ok_or(InsuranceError::InvalidParameters)?;
+            if self.env().block_timestamp() < earliest {
+                return Err(InsuranceError::TimeLockNotReady);
+            }
+            let new_admin = self.pending_admin
+                .ok_or(InsuranceError::InvalidParameters)?;
+            let old_admin = self.admin;
+            self.admin = new_admin;
+            self.pending_admin = None;
+            self.pending_admin_after = None;
+            self.env().emit_event(AdminChanged {
+                old_admin,
+                new_admin,
+                timestamp: self.env().block_timestamp(),
+            });
+            Ok(())
+        }
+
+        /// Cancel a pending admin proposal (admin only) (#301).
+        #[ink(message)]
+        pub fn cancel_pending_admin(&mut self) -> Result<(), InsuranceError> {
+            self.ensure_admin()?;
+            self.pending_admin = None;
+            self.pending_admin_after = None;
+            Ok(())
         }
 
         /// Get pool details

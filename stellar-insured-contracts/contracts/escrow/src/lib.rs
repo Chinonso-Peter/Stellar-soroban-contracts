@@ -30,6 +30,7 @@ mod propchain_escrow {
         EscrowAlreadyFunded,
         ParticipantNotFound,
         ReentrancyDetected,
+        RateLimitExceeded,
     }
 
     /// Escrow status enumeration
@@ -162,6 +163,10 @@ mod propchain_escrow {
         min_high_value_threshold: u128,
         /// Reentrancy guard for fund transfer operations
         reentrancy_lock: bool,
+        /// Rate limiting: caller -> last create_escrow_advanced timestamp (#300)
+        caller_last_escrow: Mapping<AccountId, u64>,
+        /// Minimum seconds between escrow creations per caller (default 60s) (#300)
+        escrow_rate_limit_window: u64,
     }
 
     // Events
@@ -188,6 +193,7 @@ mod propchain_escrow {
         #[ink(topic)]
         escrow_id: u64,
         amount: u128,
+        #[ink(topic)]
         recipient: AccountId,
     }
 
@@ -196,6 +202,7 @@ mod propchain_escrow {
         #[ink(topic)]
         escrow_id: u64,
         amount: u128,
+        #[ink(topic)]
         recipient: AccountId,
     }
 
@@ -280,6 +287,8 @@ mod propchain_escrow {
                 admin: Self::env().caller(),
                 min_high_value_threshold,
                 reentrancy_lock: false,
+                caller_last_escrow: Mapping::default(),
+                escrow_rate_limit_window: 60, // 60 seconds between escrow creations per caller
             }
         }
 
@@ -309,6 +318,14 @@ mod propchain_escrow {
             if required_signatures as usize > participants.len() {
                 return Err(Error::InvalidConfiguration);
             }
+
+            // Per-caller rate limit: prevent escrow creation spam (#300)
+            let now = self.env().block_timestamp();
+            let last = self.caller_last_escrow.get(&caller).unwrap_or(0);
+            if now.saturating_sub(last) < self.escrow_rate_limit_window {
+                return Err(Error::RateLimitExceeded);
+            }
+            self.caller_last_escrow.insert(&caller, &now);
 
             self.escrow_count += 1;
             let escrow_id = self.escrow_count;
