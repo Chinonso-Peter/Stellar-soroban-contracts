@@ -1,5 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 
+//! Compliance registry contract for user verification and compliance checks.
+
+
 use propchain_traits::ComplianceChecker;
 
 #[ink::contract]

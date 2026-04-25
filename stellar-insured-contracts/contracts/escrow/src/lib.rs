@@ -1,4 +1,11 @@
 #![no_std]
+//! Escrow contract for property transactions on Soroban.
+//!
+//! The contract manages escrow lifecycle states (`created`, `funded`, `released`) and
+//! stores escrow records in a single instance storage map keyed by escrow id.
+//! Storage reads are intentionally cached in local variables per operation to avoid
+//! redundant instance lookups in storage-heavy paths.
+
 use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, Symbol, Map, Vec, Val, symbol_short};
 
 #[contracterror]
@@ -21,6 +28,19 @@ pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
+    fn load_escrows(env: &Env) -> Result<Map<u64, Val>, Error> {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("escrow"))
+            .ok_or(Error::NotInitialized)
+    }
+
+    fn save_escrows(env: &Env, escrows: &Map<u64, Val>) {
+        env.storage()
+            .instance()
+            .set(&symbol_short!("escrow"), escrows);
+    }
+
     /// Initialize the escrow contract
     pub fn init(env: Env, admin: Address) -> Result<(), Error> {
         if env.storage().instance().has(&symbol_short!("admin")) {
@@ -105,12 +125,8 @@ impl EscrowContract {
             return Err(Error::InvalidAmount);
         }
 
-        let escrow_key = symbol_short!("escrow");
-        let mut escrows: Map<u64, Val> = env
-            .storage()
-            .instance()
-            .get(&escrow_key)
-            .ok_or(Error::NotInitialized)?;
+        // Read escrow map once, operate in memory, write back once.
+        let mut escrows: Map<u64, Val> = Self::load_escrows(&env)?;
         let escrow_data: (u64, Address, Address, u128, u128, Symbol, u64) = escrows
             .get(escrow_id)
             .ok_or(Error::EscrowNotFound)?
@@ -142,18 +158,14 @@ impl EscrowContract {
             created_at,
         );
         escrows.set(escrow_id, updated_escrow.into());
-        env.storage().instance().set(&escrow_key, &escrows);
+        Self::save_escrows(&env, &escrows);
         Ok(())
     }
 
     /// Release escrow funds
     pub fn release_escrow(env: Env, escrow_id: u64) -> Result<(), Error> {
-        let escrow_key = symbol_short!("escrow");
-        let mut escrows: Map<u64, Val> = env
-            .storage()
-            .instance()
-            .get(&escrow_key)
-            .ok_or(Error::NotInitialized)?;
+        // Read escrow map once, operate in memory, write back once.
+        let mut escrows: Map<u64, Val> = Self::load_escrows(&env)?;
         let escrow_data: (u64, Address, Address, u128, u128, Symbol, u64) = escrows
             .get(escrow_id)
             .ok_or(Error::EscrowNotFound)?
@@ -178,7 +190,7 @@ impl EscrowContract {
             created_at,
         );
         escrows.set(escrow_id, updated_escrow.into());
-        env.storage().instance().set(&escrow_key, &escrows);
+        Self::save_escrows(&env, &escrows);
         Ok(())
     }
 
@@ -188,12 +200,7 @@ impl EscrowContract {
         env: Env,
         escrow_id: u64,
     ) -> Result<(u64, Address, Address, u128, u128, Symbol, u64), Error> {
-        let escrow_key = symbol_short!("escrow");
-        let escrows: Map<u64, Val> = env
-            .storage()
-            .instance()
-            .get(&escrow_key)
-            .ok_or(Error::NotInitialized)?;
+        let escrows: Map<u64, Val> = Self::load_escrows(&env)?;
         Ok(escrows.get(escrow_id).ok_or(Error::EscrowNotFound)?.into())
     }
 

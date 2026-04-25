@@ -1,5 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 
+//! Fractional ownership contract for share-based property participation.
+
+
 #[ink::contract]
 mod fractional {
     use ink::prelude::vec::Vec;

@@ -1,6 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unexpected_cfgs)]
 
+//! Metadata contract for validating and storing IPFS-linked property metadata.
+
+
 use ink::prelude::string::String;
 use ink::prelude::vec::Vec;
 use ink::storage::Mapping;

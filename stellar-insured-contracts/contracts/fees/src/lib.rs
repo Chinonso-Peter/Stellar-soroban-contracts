@@ -1,6 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unexpected_cfgs)]
 
+//! Dynamic fee contract managing congestion-aware pricing and fee distribution.
+
+
 use ink::prelude::string::String;
 use ink::prelude::vec::Vec;
 use ink::storage::Mapping;

@@ -1,6 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unexpected_cfgs)]
 
+//! Cross-chain bridge contract for controlled property-token transfers.
+
+
 use ink::prelude::string::String;
 use ink::storage::Mapping;
 use propchain_traits::*;

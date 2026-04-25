@@ -1,6 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(dead_code)]
 
+//! Upgradeable proxy contract for controlled implementation upgrades.
+
+
 use propchain_traits::{UpgradeError, Upgradeable};
 
 #[ink::contract]

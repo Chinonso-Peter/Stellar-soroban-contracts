@@ -2,6 +2,9 @@
 #![allow(unexpected_cfgs)]
 #![allow(clippy::new_without_default)]
 
+//! Analytics contract for portfolio and market metrics aggregation.
+
+
 use ink::prelude::string::String;
 use ink::prelude::vec::Vec;
 

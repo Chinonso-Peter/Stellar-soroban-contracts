@@ -1,5 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 
+//! AI valuation contract integrating model pipelines for property price estimation.
+
+
 pub mod ml_pipeline;
 #[cfg(test)]
 mod tests;

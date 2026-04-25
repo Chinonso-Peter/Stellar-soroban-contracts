@@ -1,5 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 
+//! ZK compliance contract for proof-based regulatory checks.
+
+
 #[ink::contract]
 mod zk_compliance {
     use ink::prelude::vec::Vec;

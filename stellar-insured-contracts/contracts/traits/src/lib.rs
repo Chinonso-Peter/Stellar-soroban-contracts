@@ -1,5 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+//! Shared trait and error definitions used across PropChain contracts.
+
+
 use ink::prelude::string::String;
 use ink::primitives::{AccountId, Hash};
 

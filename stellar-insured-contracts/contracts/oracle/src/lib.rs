@@ -1,5 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 #![allow(
+
+//! Oracle contract for property valuation aggregation and source management.
+
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -1313,6 +1316,66 @@ mod oracle_tests {
     }
 
     #[ink::test]
+    fn test_aggregate_prices_rejects_unknown_source() {
+        let oracle = setup_oracle();
+
+        let prices = vec![
+            PriceData {
+                price: 100,
+                timestamp: ink::env::block_timestamp::<DefaultEnvironment>(),
+                source: "unknown_a".to_string(),
+            },
+            PriceData {
+                price: 101,
+                timestamp: ink::env::block_timestamp::<DefaultEnvironment>(),
+                source: "unknown_b".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            oracle.aggregate_prices(&prices),
+            Err(OracleError::OracleSourceNotFound)
+        );
+    }
+
+    #[ink::test]
+    fn test_aggregate_prices_rejects_zero_total_weight() {
+        let mut oracle = setup_oracle();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+
+        for id in ["zero1", "zero2"] {
+            oracle
+                .add_oracle_source(OracleSource {
+                    id: id.to_string(),
+                    source_type: OracleSourceType::Manual,
+                    address: accounts.bob,
+                    is_active: true,
+                    weight: 0,
+                    last_updated: ink::env::block_timestamp::<DefaultEnvironment>(),
+                })
+                .expect("Oracle source registration should succeed in test");
+        }
+
+        let prices = vec![
+            PriceData {
+                price: 100,
+                timestamp: ink::env::block_timestamp::<DefaultEnvironment>(),
+                source: "zero1".to_string(),
+            },
+            PriceData {
+                price: 102,
+                timestamp: ink::env::block_timestamp::<DefaultEnvironment>(),
+                source: "zero2".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            oracle.aggregate_prices(&prices),
+            Err(OracleError::InvalidParameters)
+        );
+    }
+
+    #[ink::test]
     fn test_filter_outliers_works() {
         let oracle = setup_oracle();
 
@@ -1751,6 +1814,28 @@ mod oracle_tests {
             0,
             "Stake must be clamped to 0, not underflow"
         );
+    }
+
+    /// Slashing with zero stake and no risk pool should still apply a reputation penalty.
+    #[ink::test]
+    fn test_slash_source_zero_stake_still_penalizes_reputation() {
+        let mut oracle = setup_oracle();
+        let source_id = "no_stake_source".to_string();
+
+        assert!(oracle.slash_source(source_id.clone(), 500).is_ok());
+        assert_eq!(oracle.source_stakes.get(&source_id).unwrap_or(0), 0);
+        assert_eq!(oracle.source_reputations.get(&source_id).unwrap_or(500), 450);
+    }
+
+    /// Slashing with penalty 0 should be a no-op for stake but still execute without error.
+    #[ink::test]
+    fn test_slash_source_zero_penalty_no_stake_change() {
+        let mut oracle = setup_oracle();
+        let source_id = "zero_penalty_source".to_string();
+
+        oracle.source_stakes.insert(&source_id, &700);
+        assert!(oracle.slash_source(source_id.clone(), 0).is_ok());
+        assert_eq!(oracle.source_stakes.get(&source_id).unwrap_or(0), 700);
     }
 
     /// `get_valuation_with_confidence` must propagate PropertyNotFound for unknown properties.
