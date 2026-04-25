@@ -217,6 +217,7 @@ mod bridge {
 
         /// Initiates a bridge request with multi-signature requirement
         #[ink(message)]
+        #[must_use]
         pub fn initiate_bridge_multisig(
             &mut self,
             token_id: TokenId,
@@ -479,6 +480,7 @@ mod bridge {
 
         /// Gets gas estimation for a bridge operation
         #[ink(message)]
+        #[must_use]
         pub fn estimate_bridge_gas(
             &self,
             _token_id: TokenId,
@@ -497,6 +499,7 @@ mod bridge {
 
         /// Monitors bridge status
         #[ink(message)]
+        #[must_use]
         pub fn monitor_bridge_status(&self, request_id: u64) -> Option<BridgeMonitoringInfo> {
             let request = self.bridge_requests.get(request_id)?;
 
@@ -516,6 +519,7 @@ mod bridge {
 
         /// Verifies a bridge transaction
         #[ink(message)]
+        #[must_use]
         pub fn verify_bridge_transaction(
             &self,
             transaction_hash: Hash,
@@ -528,6 +532,7 @@ mod bridge {
 
         /// Gets bridge history for an account
         #[ink(message)]
+        #[must_use]
         pub fn get_bridge_history(&self, account: AccountId) -> Vec<BridgeTransaction> {
             self.bridge_history.get(account).unwrap_or_default()
         }
@@ -561,12 +566,14 @@ mod bridge {
 
         /// Checks if an account is a bridge operator
         #[ink(message)]
+        #[must_use]
         pub fn is_bridge_operator(&self, account: AccountId) -> bool {
             self.bridge_operators.contains(&account)
         }
 
         /// Gets all bridge operators
         #[ink(message)]
+        #[must_use]
         pub fn get_bridge_operators(&self) -> Vec<AccountId> {
             self.bridge_operators.clone()
         }
@@ -585,6 +592,7 @@ mod bridge {
 
         /// Gets current bridge configuration
         #[ink(message)]
+        #[must_use]
         pub fn get_config(&self) -> BridgeConfig {
             self.config.clone()
         }

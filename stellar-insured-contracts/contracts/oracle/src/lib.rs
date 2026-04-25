@@ -188,6 +188,9 @@ mod propchain_oracle {
             }
         }
 
+        /// Maximum number of properties to process in a single batch operation
+        const MAX_BATCH_SIZE: usize = 10;
+
         /// Set the risk pool address that receives slashed funds (admin only)
         #[ink(message)]
         pub fn set_risk_pool(&mut self, risk_pool: AccountId) -> Result<(), OracleError> {
@@ -348,15 +351,16 @@ mod propchain_oracle {
             Ok(request_id)
         }
 
-        /// Batch request valuations for multiple properties
+        /// Batch request valuations for multiple properties (limited to MAX_BATCH_SIZE for gas efficiency)
         #[ink(message)]
         pub fn batch_request_valuations(
             &mut self,
             property_ids: Vec<u64>,
         ) -> Result<Vec<u64>, OracleError> {
+            let max_to_process = property_ids.len().min(Self::MAX_BATCH_SIZE);
             let mut request_ids = Vec::new();
-            for id in property_ids {
-                if let Ok(req_id) = self.request_property_valuation(id) {
+            for i in 0..max_to_process {
+                if let Ok(req_id) = self.request_property_valuation(property_ids[i]) {
                     request_ids.push(req_id);
                 }
             }

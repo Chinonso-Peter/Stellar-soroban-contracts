@@ -868,12 +868,16 @@ mod propchain_insurance {
             }
         }
 
+        /// Maximum number of claims to process in a single batch operation
+        const MAX_BATCH_SIZE: usize = 10;
+
         // =====================================================================
         // POOL MANAGEMENT
         // =====================================================================
 
         /// Create a new risk pool (admin only)
         #[ink(message)]
+        #[must_use]
         pub fn create_risk_pool(
             &mut self,
             name: String,
@@ -1041,6 +1045,7 @@ mod propchain_insurance {
 
         /// Return the configured claim cooldown period.
         #[ink(message)]
+        #[must_use]
         pub fn claim_cooldown_period(&self) -> u64 {
             self.claim_cooldown_period
         }
@@ -1072,6 +1077,7 @@ mod propchain_insurance {
             /// Scan and expire policies whose `end_time` has passed. Anyone may call this to
             /// process automatic expirations. Returns the number of policies expired.
             #[ink(message)]
+            #[must_use]
             pub fn expire_policies(&mut self, max_scan: u64) -> u64 {
                 let mut expired_count: u64 = 0;
                 let now = self.env().block_timestamp();
@@ -1235,6 +1241,7 @@ mod propchain_insurance {
 
         /// Claim accrued rewards to the caller (checks-effects-interactions).
         #[ink(message)]
+        #[must_use]
         pub fn claim_rewards(&mut self, pool_id: u64) -> Result<u128, InsuranceError> {
             let caller = self.env().caller();
             let mut pool = self
@@ -1355,6 +1362,7 @@ mod propchain_insurance {
 
         /// Claim vested portion of previously-vested rewards for a provider
         #[ink(message)]
+        #[must_use]
         pub fn claim_vested_rewards(&mut self, pool_id: u64) -> Result<u128, InsuranceError> {
             let caller = self.env().caller();
             let mut pool = self
@@ -1455,6 +1463,7 @@ mod propchain_insurance {
 
         /// View vesting info for a provider
         #[ink(message)]
+        #[must_use]
         pub fn get_vesting_info(&self, pool_id: u64, provider: AccountId) -> (u128, u128, u64) {
             let p = self.liquidity_providers.get(&(pool_id, provider));
             if let Some(info) = p {
@@ -1466,6 +1475,7 @@ mod propchain_insurance {
 
         /// View: pending reward amount for an account (fixed-point accurate vs on-chain claim).
         #[ink(message)]
+        #[must_use]
         pub fn get_pending_rewards(&self, pool_id: u64, provider: AccountId) -> u128 {
             let Some(pool) = self.pools.get(&pool_id) else {
                 return 0;
@@ -1535,6 +1545,7 @@ mod propchain_insurance {
 
         /// Calculate premium for a policy
         #[ink(message)]
+        #[must_use]
         pub fn calculate_premium(
             &self,
             property_id: u64,
@@ -1801,6 +1812,7 @@ mod propchain_insurance {
 
         /// Submit an insurance claim
         #[ink(message)]
+        #[must_use]
         pub fn submit_claim(
             &mut self,
             policy_id: u64,
@@ -2052,9 +2064,10 @@ mod propchain_insurance {
         // BATCH CLAIM OPERATIONS
         // =====================================================================
 
-        /// Batch approve multiple claims in a single transaction
+        /// Batch approve multiple claims in a single transaction (limited to MAX_BATCH_SIZE for gas efficiency)
         /// Returns summary with individual results for partial failure handling
         #[ink(message)]
+        #[must_use]
         pub fn batch_approve_claims(
             &mut self,
             claim_ids: Vec<u64>,
@@ -2066,11 +2079,28 @@ mod propchain_insurance {
                 return Err(InsuranceError::Unauthorized);
             }
 
+            let max_to_process = claim_ids.len().min(Self::MAX_BATCH_SIZE);
             let mut results: Vec<BatchClaimResult> = Vec::new();
             let mut successful = 0u64;
             let mut failed = 0u64;
 
-            for claim_id in claim_ids.iter() {
+            for i in 0..max_to_process {
+                let result = self.process_single_claim(
+                    claim_ids[i],
+                    true,
+                    oracle_report_url.clone(),
+                    String::new(),
+                    caller,
+                );
+
+                match &result {
+                    BatchClaimResult { success: true, .. } => {
+                        successful += 1;
+                    }
+                    BatchClaimResult { success: false, .. } => {
+                        failed += 1;
+                    }
+                }
                 let result = self.process_single_claim(
                     *claim_id,
                     true,
@@ -2101,7 +2131,7 @@ mod propchain_insurance {
             Ok(summary)
         }
 
-        /// Batch reject multiple claims in a single transaction
+        /// Batch reject multiple claims in a single transaction (limited to MAX_BATCH_SIZE for gas efficiency)
         /// Returns summary with individual results for partial failure handling
         #[ink(message)]
         pub fn batch_reject_claims(
@@ -2115,11 +2145,28 @@ mod propchain_insurance {
                 return Err(InsuranceError::Unauthorized);
             }
 
+            let max_to_process = claim_ids.len().min(Self::MAX_BATCH_SIZE);
             let mut results: Vec<BatchClaimResult> = Vec::new();
             let mut successful = 0u64;
             let mut failed = 0u64;
 
-            for claim_id in claim_ids.iter() {
+            for i in 0..max_to_process {
+                let result = self.process_single_claim(
+                    claim_ids[i],
+                    false,
+                    String::new(),
+                    rejection_reason.clone(),
+                    caller,
+                );
+
+                match &result {
+                    BatchClaimResult { success: true, .. } => {
+                        successful += 1;
+                    }
+                    BatchClaimResult { success: false, .. } => {
+                        failed += 1;
+                    }
+                }
                 let result = self.process_single_claim(
                     *claim_id,
                     false,
