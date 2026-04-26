@@ -2190,3 +2190,134 @@
         );
         assert!(result.is_ok());
     }
+
+    // =========================================================================
+    // RBAC TESTS (#346)
+    // =========================================================================
+
+    #[ink::test]
+    fn test_admin_has_admin_role_after_init() {
+        let contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        assert!(contract.has_role(accounts.alice, crate::Role::Admin));
+    }
+
+    #[ink::test]
+    fn test_non_admin_does_not_have_admin_role() {
+        let contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        assert!(!contract.has_role(accounts.bob, crate::Role::Admin));
+    }
+
+    #[ink::test]
+    fn test_grant_role_assessor() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        // alice (admin) grants bob the Assessor role
+        contract
+            .grant_role(accounts.bob, crate::Role::Assessor)
+            .expect("grant_role failed");
+        assert!(contract.has_role(accounts.bob, crate::Role::Assessor));
+    }
+
+    #[ink::test]
+    fn test_grant_role_oracle() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        contract
+            .grant_role(accounts.charlie, crate::Role::Oracle)
+            .expect("grant_role failed");
+        assert!(contract.has_role(accounts.charlie, crate::Role::Oracle));
+    }
+
+    #[ink::test]
+    fn test_revoke_role() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        contract
+            .grant_role(accounts.bob, crate::Role::Assessor)
+            .unwrap();
+        contract
+            .revoke_role(accounts.bob, crate::Role::Assessor)
+            .unwrap();
+        assert!(!contract.has_role(accounts.bob, crate::Role::Assessor));
+    }
+
+    #[ink::test]
+    fn test_grant_role_unauthorized() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        // bob (non-admin) tries to grant a role
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+        let result = contract.grant_role(accounts.charlie, crate::Role::Assessor);
+        assert_eq!(result, Err(InsuranceError::Unauthorized));
+    }
+
+    #[ink::test]
+    fn test_revoke_role_unauthorized() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        contract
+            .grant_role(accounts.bob, crate::Role::Assessor)
+            .unwrap();
+        // charlie (non-admin) tries to revoke bob's role
+        test::set_caller::<DefaultEnvironment>(accounts.charlie);
+        let result = contract.revoke_role(accounts.bob, crate::Role::Assessor);
+        assert_eq!(result, Err(InsuranceError::Unauthorized));
+    }
+
+    #[ink::test]
+    fn test_admin_role_satisfies_assessor_check() {
+        let contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        // Admin implicitly satisfies every role check
+        assert!(contract.has_role(accounts.alice, crate::Role::Assessor));
+        assert!(contract.has_role(accounts.alice, crate::Role::Oracle));
+        assert!(contract.has_role(accounts.alice, crate::Role::Underwriter));
+    }
+
+    #[ink::test]
+    fn test_get_roles_returns_granted_roles() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        contract
+            .grant_role(accounts.bob, crate::Role::Assessor)
+            .unwrap();
+        contract
+            .grant_role(accounts.bob, crate::Role::Oracle)
+            .unwrap();
+        let roles = contract.get_roles(accounts.bob);
+        assert!(roles.contains(&crate::Role::Assessor));
+        assert!(roles.contains(&crate::Role::Oracle));
+        assert!(!roles.contains(&crate::Role::Admin));
+    }
+
+    #[ink::test]
+    fn test_authorize_oracle_backwards_compat() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        contract.authorize_oracle(accounts.bob).unwrap();
+        assert!(contract.has_role(accounts.bob, crate::Role::Oracle));
+    }
+
+    #[ink::test]
+    fn test_authorize_assessor_backwards_compat() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        contract.authorize_assessor(accounts.bob).unwrap();
+        assert!(contract.has_role(accounts.bob, crate::Role::Assessor));
+    }
+
+    #[ink::test]
+    fn test_non_admin_cannot_create_pool() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+        let result = contract.create_risk_pool(
+            "Unauthorized Pool".into(),
+            CoverageType::Fire,
+            8000,
+            500_000_000_000u128,
+        );
+        assert_eq!(result, Err(InsuranceError::Unauthorized));
+    }

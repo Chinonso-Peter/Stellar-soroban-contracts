@@ -11,11 +11,15 @@
 
 use ink::storage::Mapping;
 
+mod rbac;
+pub use rbac::{Role, RoleManager};
+
 /// Decentralized Property Insurance Platform
 #[ink::contract]
 mod propchain_insurance {
     use super::*;
     use ink::prelude::{string::String, vec::Vec};
+    use crate::{Role, RoleManager};
 
     // =========================================================================
     // ERROR TYPES
@@ -441,6 +445,9 @@ mod propchain_insurance {
     pub struct PropertyInsurance {
         admin: AccountId,
 
+        // Role-based access control
+        role_manager: RoleManager,
+
         // Policies
         policies: Mapping<u64, InsurancePolicy>,
         policy_count: u64,
@@ -815,6 +822,24 @@ mod propchain_insurance {
         #[ink(topic)]
         new_admin: AccountId,
         timestamp: u64,
+    }
+
+    /// Emitted when a role is granted to an account (#346)
+    #[ink(event)]
+    pub struct RoleGranted {
+        #[ink(topic)]
+        account: AccountId,
+        role: Role,
+        granted_by: AccountId,
+    }
+
+    /// Emitted when a role is revoked from an account (#346)
+    #[ink(event)]
+    pub struct RoleRevoked {
+        #[ink(topic)]
+        account: AccountId,
+        role: Role,
+        revoked_by: AccountId,
     }
 
     // =========================================================================
