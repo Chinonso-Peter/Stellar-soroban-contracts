@@ -1,217 +1,203 @@
 #![no_std]
-//! Escrow contract for property transactions on Soroban.
-//!
-//! The contract manages escrow lifecycle states (`created`, `funded`, `released`) and
-//! stores escrow records in a single instance storage map keyed by escrow id.
-//! Storage reads are intentionally cached in local variables per operation to avoid
-//! redundant instance lookups in storage-heavy paths.
 
-use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, Symbol, Map, Vec, Val, symbol_short};
+mod storage;
+mod types;
+mod validation;
 
-#[contracterror]
-#[derive(Copy, Clone, Debug, PartialEq)]
-#[repr(u32)]
-pub enum Error {
-    AlreadyInitialized = 1,
-    NotInitialized = 2,
-    Unauthorized = 3,
-    InvalidAmount = 4,
-    BuyerSellerSame = 5,
-    EscrowNotFound = 6,
-    InvalidState = 7,
-    EscrowNotCreated = 8,
-    EscrowNotFunded = 9,
-}
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Vec};
+
+use storage::DataKey;
+use types::{ApprovalType, EscrowData, EscrowStatus, MultiSigConfig};
+use validation::{require_not_paused, require_valid_multisig};
 
 #[contract]
-pub struct EscrowContract;
+pub struct AdvancedEscrow;
 
 #[contractimpl]
-impl EscrowContract {
-    /// Load the escrow storage map or return `NotInitialized` before setup.
-    fn load_escrows(env: &Env) -> Result<Map<u64, Val>, Error> {
-        env.storage()
-            .instance()
-            .get(&symbol_short!("escrow"))
-            .ok_or(Error::NotInitialized)
-    }
-
-    /// Persist the in-memory escrow map after a state transition.
-    fn save_escrows(env: &Env, escrows: &Map<u64, Val>) {
-        env.storage()
-            .instance()
-            .set(&symbol_short!("escrow"), escrows);
-    }
-
-    /// Initialize the escrow contract
-    pub fn init(env: Env, admin: Address) -> Result<(), Error> {
-        if env.storage().instance().has(&symbol_short!("admin")) {
-            return Err(Error::AlreadyInitialized);
+impl AdvancedEscrow {
+    pub fn init(env: Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("Already initialized");
         }
-        env.storage().instance().set(&symbol_short!("admin"), &admin);
-        env.storage().instance().set(&symbol_short!("escrow_count"), &0u64);
-        Ok(())
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::EscrowCount, &0u64);
+        env.storage().instance().set(&DataKey::Paused, &false);
     }
 
-    /// Transfer admin to a new address (admin only)
-    pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&symbol_short!("admin"))
-            .ok_or(Error::NotInitialized)?;
+    pub fn set_pause(env: Env, admin: Address, paused: bool) {
         admin.require_auth();
-        env.storage().instance().set(&symbol_short!("admin"), &new_admin);
-        Ok(())
+        let current_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if admin != current_admin {
+            panic!("Unauthorized");
+        }
+        env.storage().instance().set(&DataKey::Paused, &paused);
     }
 
-    /// Create a new escrow
-    #[must_use]
-    pub fn create_escrow(
+    pub fn create_escrow_advanced(
         env: Env,
         property_id: u64,
+        amount: i128,
         buyer: Address,
         seller: Address,
-        amount: u128,
-    ) -> Result<u64, Error> {
-        if amount == 0 {
-            return Err(Error::InvalidAmount);
-        }
-        if buyer == seller {
-            return Err(Error::BuyerSellerSame);
-        }
+        participants: Vec<Address>,
+        required_signatures: u32,
+        release_time_lock: Option<u64>,
+    ) -> u64 {
+        require_not_paused(&env);
+        require_valid_multisig(required_signatures, participants.len());
 
-        let admin: Address = env
+        let mut count: u64 = env
             .storage()
             .instance()
-            .get(&symbol_short!("admin"))
-            .ok_or(Error::NotInitialized)?;
-        admin.require_auth();
-
-        let mut escrow_count: u64 = env
-            .storage()
-            .instance()
-            .get(&symbol_short!("escrow_count"))
+            .get(&DataKey::EscrowCount)
             .unwrap_or(0);
-        escrow_count += 1;
-        env.storage()
-            .instance()
-            .set(&symbol_short!("escrow_count"), &escrow_count);
+        count += 1;
+        env.storage().instance().set(&DataKey::EscrowCount, &count);
 
-        let escrow_key = symbol_short!("escrow");
-        let mut escrows: Map<u64, Val> = env
-            .storage()
-            .instance()
-            .get(&escrow_key)
-            .unwrap_or(Map::new(&env));
-
-        let escrow_data = (
+        let escrow_data = EscrowData {
+            id: count,
             property_id,
-            buyer.clone(),
-            seller.clone(),
+            buyer,
+            seller,
             amount,
-            0u128,                    // deposited_amount
-            symbol_short!("created"), // status
-            env.ledger().timestamp(), // created_at
+            deposited_amount: 0,
+            status: EscrowStatus::Created,
+            created_at: env.ledger().timestamp(),
+            release_time_lock,
+            participants: participants.clone(),
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(count), &escrow_data);
+
+        let config = MultiSigConfig {
+            required_signatures,
+            signers: participants,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultiSig(count), &config);
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("created")),
+            (count, property_id, amount),
         );
 
-        escrows.set(escrow_count, escrow_data.into());
-        env.storage().instance().set(&escrow_key, &escrows);
-
-        Ok(escrow_count)
+        count
     }
 
-    /// Deposit funds into escrow
-    pub fn deposit_funds(env: Env, escrow_id: u64, amount: u128) -> Result<(), Error> {
-        if amount == 0 {
-            return Err(Error::InvalidAmount);
+    pub fn deposit_funds(env: Env, escrow_id: u64, amount: i128) {
+        require_not_paused(&env);
+
+        let mut escrow: EscrowData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Escrow(escrow_id))
+            .expect("Escrow not found");
+
+        if escrow.status != EscrowStatus::Created && escrow.status != EscrowStatus::Funded {
+            panic!("Invalid status");
         }
 
-        // Read escrow map once, operate in memory, write back once.
-        let mut escrows: Map<u64, Val> = Self::load_escrows(&env)?;
-        let escrow_data: (u64, Address, Address, u128, u128, Symbol, u64) = escrows
-            .get(escrow_id)
-            .ok_or(Error::EscrowNotFound)?
-            .into();
-
-        let (property_id, buyer, seller, total_amount, deposited_amount, status, created_at) =
-            escrow_data;
-
-        if status != symbol_short!("created") {
-            return Err(Error::EscrowNotCreated);
-        }
-
-        buyer.require_auth();
-
-        let new_deposited = deposited_amount + amount;
-        let new_status = if new_deposited >= total_amount {
-            symbol_short!("funded")
+        escrow.deposited_amount += amount;
+        escrow.status = if escrow.deposited_amount >= escrow.amount {
+            EscrowStatus::Active
         } else {
-            symbol_short!("created")
+            EscrowStatus::Funded
         };
 
-        let updated_escrow = (
-            property_id,
-            buyer,
-            seller,
-            total_amount,
-            new_deposited,
-            new_status,
-            created_at,
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(escrow_id), &escrow);
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("funded")),
+            (escrow_id, amount),
         );
-        escrows.set(escrow_id, updated_escrow.into());
-        Self::save_escrows(&env, &escrows);
-        Ok(())
     }
 
-    /// Release escrow funds
-    pub fn release_escrow(env: Env, escrow_id: u64) -> Result<(), Error> {
-        // Read escrow map once, operate in memory, write back once.
-        let mut escrows: Map<u64, Val> = Self::load_escrows(&env)?;
-        let escrow_data: (u64, Address, Address, u128, u128, Symbol, u64) = escrows
-            .get(escrow_id)
-            .ok_or(Error::EscrowNotFound)?
-            .into();
+    pub fn release_funds(env: Env, escrow_id: u64) {
+        require_not_paused(&env);
 
-        let (property_id, buyer, seller, total_amount, deposited_amount, status, created_at) =
-            escrow_data;
+        let mut escrow: EscrowData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Escrow(escrow_id))
+            .expect("Escrow not found");
 
-        if status != symbol_short!("funded") {
-            return Err(Error::EscrowNotFunded);
+        if escrow.status != EscrowStatus::Active {
+            panic!("Invalid status");
         }
 
-        seller.require_auth();
+        if let Some(time_lock) = escrow.release_time_lock {
+            if env.ledger().timestamp() < time_lock {
+                panic!("Time lock active");
+            }
+        }
 
-        let updated_escrow = (
-            property_id,
-            buyer,
-            seller,
-            total_amount,
-            deposited_amount,
-            symbol_short!("released"),
-            created_at,
-        );
-        escrows.set(escrow_id, updated_escrow.into());
-        Self::save_escrows(&env, &escrows);
-        Ok(())
-    }
+        let sig_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SigCount(escrow_id, ApprovalType::Release))
+            .unwrap_or(0);
+        let config: MultiSigConfig = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultiSig(escrow_id))
+            .unwrap();
 
-    /// Get escrow details
-    #[must_use]
-    pub fn get_escrow(
-        env: Env,
-        escrow_id: u64,
-    ) -> Result<(u64, Address, Address, u128, u128, Symbol, u64), Error> {
-        let escrows: Map<u64, Val> = Self::load_escrows(&env)?;
-        Ok(escrows.get(escrow_id).ok_or(Error::EscrowNotFound)?.into())
-    }
+        if sig_count < config.required_signatures {
+            panic!("Signature threshold not met");
+        }
 
-    /// Get total escrow count
-    #[must_use]
-    pub fn escrow_count(env: Env) -> u64 {
+        let amount = escrow.deposited_amount;
+        escrow.status = EscrowStatus::Released;
+        escrow.deposited_amount = 0;
         env.storage()
-            .instance()
-            .get(&symbol_short!("escrow_count"))
-            .unwrap_or(0)
+            .persistent()
+            .set(&DataKey::Escrow(escrow_id), &escrow);
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("released")),
+            (escrow_id, amount),
+        );
+    }
+
+    pub fn sign_approval(env: Env, escrow_id: u64, approval_type: ApprovalType, signer: Address) {
+        require_not_paused(&env);
+        signer.require_auth();
+
+        let config: MultiSigConfig = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MultiSig(escrow_id))
+            .expect("Escrow not found");
+
+        if !config.signers.contains(signer.clone()) {
+            panic!("Unauthorized");
+        }
+
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Signature(escrow_id, approval_type, signer.clone()))
+        {
+            panic!("Already signed");
+        }
+
+        env.storage().persistent().set(
+            &DataKey::Signature(escrow_id, approval_type, signer),
+            &true,
+        );
+
+        let mut count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SigCount(escrow_id, approval_type))
+            .unwrap_or(0);
+        count += 1;
+        env.storage()
+            .persistent()
+            .set(&DataKey::SigCount(escrow_id, approval_type), &count);
     }
 }

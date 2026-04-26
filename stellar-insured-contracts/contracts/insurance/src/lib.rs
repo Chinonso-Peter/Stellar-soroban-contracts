@@ -1,13 +1,12 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 #![allow(
-
-//! Property insurance contract module wiring, types, and delegated implementations.
-
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::needless_borrows_for_generic_args
 )]
+
+//! Property insurance contract module wiring, types, and delegated implementations.
 
 use ink::storage::Mapping;
 
@@ -21,61 +20,18 @@ mod propchain_insurance {
     use ink::prelude::{string::String, vec::Vec};
     use crate::{Role, RoleManager};
 
-    // =========================================================================
-    // ERROR TYPES
-    // =========================================================================
-
-    #[derive(Debug, Clone, PartialEq, Eq, scale::Encode, scale::Decode, ink::storage::traits::StorageLayout)]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub enum InsuranceError {
-        Unauthorized,
-        PolicyNotFound,
-        ClaimNotFound,
-        PoolNotFound,
-        PolicyAlreadyActive,
-        PolicyExpired,
-        PolicyInactive,
-        InsufficientPremium,
-        InsufficientPoolFunds,
-        ClaimAlreadyProcessed,
-        ClaimExceedsCoverage,
-        InvalidParameters,
-        OracleVerificationFailed,
-        ReinsuranceCapacityExceeded,
-        TokenNotFound,
-        TransferFailed,
-        CooldownPeriodActive,
-        PropertyNotInsurable,
-        DuplicateClaim,
-        // #133 – evidence validation errors
-        InvalidEvidenceUri,
-        InvalidEvidenceHash,
-        InvalidEvidenceNonce,
-        // #134 – dispute errors
-        DisputeWindowExpired,
-        InvalidDisputeTransition,
-        // Security errors
-        ContractPaused,
-        NonceAlreadyUsed,
-        PremiumTooLow,
-        // Evidence validation errors
-        EvidenceNonceEmpty,
-        EvidenceInvalidUriScheme,
-        EvidenceInvalidHashLength,
-        ZeroAmount,
-        InsufficientStake,
-        InsufficientPoolLiquidity,
-        // Time-lock errors (#301)
-        TimeLockPending,
-        TimeLockNotReady,
-    }
-
-    /// Fixed-point precision for [`RiskPool::accumulated_reward_per_share`] (1e18).
-    const REWARD_PRECISION: u128 = 1_000_000_000_000_000_000;
+    pub use crate::types::{
+        ActuarialModel, BatchClaimResult, BatchClaimSummary, ClaimStatus, CoverageType,
+        EvidenceItem, EvidenceMetadata, EvidenceVerification, InsuranceClaim, InsuranceError,
+        InsurancePolicy, InsuranceToken, PolicyStatus, PolicyType, PoolLiquidityProvider,
+        PremiumCalculation, ReinsuranceAgreement, RiskAssessment, RiskLevel, RiskPool,
+        UnderwritingCriteria, REWARD_PRECISION,
+    };
 
     // =========================================================================
-    // DATA TYPES
+    // EVENTS  (extracted to events.rs, included here so ink! macros see them)
     // =========================================================================
+    include!("events.rs");
 
     #[derive(
         Debug,
@@ -474,14 +430,14 @@ mod propchain_insurance {
         // Insurance Tokens (secondary market)
         insurance_tokens: Mapping<u64, InsuranceToken>,
         token_count: u64,
-        token_listings: Vec<u64>, // Tokens listed for sale
+        token_listings: Vec<u64>,
 
         // Actuarial Models
         actuarial_models: Mapping<u64, ActuarialModel>,
         model_count: u64,
 
         // Underwriting
-        underwriting_criteria: Mapping<u64, UnderwritingCriteria>, // pool_id -> criteria
+        underwriting_criteria: Mapping<u64, UnderwritingCriteria>,
 
         // Liquidity providers
         liquidity_providers: Mapping<(u64, AccountId), PoolLiquidityProvider>,
@@ -495,9 +451,8 @@ mod propchain_insurance {
 
         // Claim cooldown: property_id -> last_claim_timestamp
         claim_cooldowns: Mapping<u64, u64>,
-        // Rate limiting: caller -> last_submit_claim_timestamp (#300)
+        // Rate limiting: caller -> last_submit_claim_timestamp
         caller_last_claim: Mapping<AccountId, u64>,
-        
 
         // Evidence tracking
         evidence_count: u64,
@@ -509,12 +464,12 @@ mod propchain_insurance {
         oracle_contract: Option<AccountId>,
 
         // Platform settings
-        platform_fee_rate: u32,     // Basis points (e.g. 200 = 2%)
-        claim_cooldown_period: u64, // In seconds
+        platform_fee_rate: u32,
+        claim_cooldown_period: u64,
         min_pool_capital: u128,
-        dispute_window_seconds: u64, // #134 – window after UnderReview within which disputes can be raised
-        arbiter: Option<AccountId>,  // #134 – designated dispute arbiter (falls back to admin)
-        
+        dispute_window_seconds: u64,
+        arbiter: Option<AccountId>,
+
         // Security: track used evidence nonces to prevent replay attacks
         used_evidence_nonces: Mapping<(u64, String), bool>, // (property_id, nonce) -> bool
         
@@ -524,24 +479,21 @@ mod propchain_insurance {
         
         // Emergency pause mechanism
         is_paused: bool,
-        // Time-lock for admin operations (#301)
-        // Stores the earliest timestamp at which a pending admin action may execute.
-        // None means no action is pending.
+        // Time-lock for admin operations
         pending_pause_after: Option<u64>,
         pending_admin: Option<AccountId>,
         pending_admin_after: Option<u64>,
-        /// Delay in seconds before a proposed admin action takes effect (default 86400 = 24 h)
         admin_timelock_delay: u64,
-        
+
         // Fee tracking
         total_platform_fees_collected: u128,
-        
+
         // Minimum premium to prevent rounding exploits
         min_premium_amount: u128,
     }
 
     // =========================================================================
-    // EVENTS
+    // IMPLEMENTATION  (extracted to insurance_impl.rs)
     // =========================================================================
 
     #[ink(event)]
@@ -876,6 +828,4 @@ pub use crate::propchain_insurance::{InsuranceError, PropertyInsurance};
 #[cfg(test)]
 mod insurance_tests {
     include!("insurance_tests.rs");
-}
-
 }

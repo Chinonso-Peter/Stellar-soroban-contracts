@@ -1,766 +1,267 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-#![allow(unexpected_cfgs)]
+#![no_std]
 
-//! Cross-chain bridge contract for controlled property-token transfers.
+mod storage;
+mod types;
+mod validation;
 
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, Env, String, Vec};
 
-use ink::prelude::string::String;
-use ink::storage::Mapping;
-use propchain_traits::*;
-#[cfg(not(feature = "std"))]
-use scale_info::prelude::vec::Vec;
+use storage::{DataKey, MAX_HISTORY_ITEMS};
+use types::{
+    BridgeConfig, BridgeOperationStatus, BridgeTransaction, ChainBridgeInfo,
+    MultisigBridgeRequest, PropertyMetadata, RecoveryAction,
+};
+use validation::{
+    require_admin, require_not_paused, require_operator, require_supported_chain,
+    require_valid_signatures,
+};
 
-#[ink::contract]
-mod bridge {
-    use super::*;
+#[contract]
+pub struct PropertyBridge;
 
-    /// Error types for the bridge contract
-    #[derive(Debug, PartialEq, Eq, scale::Encode, scale::Decode)]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub enum Error {
-        Unauthorized,
-        TokenNotFound,
-        InvalidChain,
-        BridgeNotSupported,
-        InsufficientSignatures,
-        RequestExpired,
-        AlreadySigned,
-        InvalidRequest,
-        BridgePaused,
-        InvalidMetadata,
-        DuplicateRequest,
-        GasLimitExceeded,
-        NotEnoughConfirmations,
-        MigrationPaused,
-    }
-
-    /// Bridge contract for cross-chain property token transfers
-    #[ink(storage)]
-    pub struct PropertyBridge {
-        /// Bridge configuration
-        config: BridgeConfig,
-
-        /// Multi-signature bridge requests
-        bridge_requests: Mapping<u64, MultisigBridgeRequest>,
-
-        /// Bridge transaction history
-        bridge_history: Mapping<AccountId, Vec<BridgeTransaction>>,
-
-        /// Chain-specific information
-        chain_info: Mapping<ChainId, ChainBridgeInfo>,
-
-        /// Transaction verification records
-        verified_transactions: Mapping<Hash, bool>,
-
-        /// Bridge operators
-        bridge_operators: Vec<AccountId>,
-
-        /// Request counter
-        request_counter: u64,
-
-        /// Transaction counter
-        transaction_counter: u64,
-
-        /// Admin account
-        admin: AccountId,
-
-        /// Trusted Merkle roots per source chain (submitted by operators)
-        trusted_roots: Mapping<ChainId, Hash>,
-    }
-
-    /// Emitted when a trusted Merkle root is updated for a source chain
-    #[ink(event)]
-    pub struct TrustedRootUpdated {
-        #[ink(topic)]
-        pub chain_id: ChainId,
-        pub root: Hash,
-        pub updated_by: AccountId,
-    }
-
-    /// Monitoring: emitted for large bridge operations (issue #307)
-    #[ink(event)]
-    pub struct BridgeVolumeAlert {
-        #[ink(topic)]
-        pub request_id: u64,
-        #[ink(topic)]
-        pub token_id: TokenId,
-        pub severity: u8, // 1=info, 2=warn, 3=critical
-    }
-
-    /// Monitoring: emitted when a bridge request expires without execution
-    #[ink(event)]
-    pub struct BridgeRequestExpired {
-        #[ink(topic)]
-        pub request_id: u64,
-        pub expired_at_block: u64,
-        /// Address of the PropertyToken contract used for ownership verification.
-        /// The bridge calls `owner_of` and `get_approved` on this contract to
-        /// confirm that the caller is authorised to bridge a given token.
-        property_token_contract: AccountId,
-    }
-
-    /// Events for bridge operations
-    #[ink(event)]
-    pub struct BridgeRequestCreated {
-        #[ink(topic)]
-        pub request_id: u64,
-        #[ink(topic)]
-        pub token_id: TokenId,
-        #[ink(topic)]
-        pub source_chain: ChainId,
-        #[ink(topic)]
-        pub destination_chain: ChainId,
-        #[ink(topic)]
-        pub requester: AccountId,
-    }
-
-    #[ink(event)]
-    pub struct BridgeRequestSigned {
-        #[ink(topic)]
-        pub request_id: u64,
-        #[ink(topic)]
-        pub signer: AccountId,
-        pub signatures_collected: u8,
-        pub signatures_required: u8,
-    }
-
-    #[ink(event)]
-    pub struct BridgeExecuted {
-        #[ink(topic)]
-        pub request_id: u64,
-        #[ink(topic)]
-        pub token_id: TokenId,
-        #[ink(topic)]
-        pub transaction_hash: Hash,
-    }
-
-    #[ink(event)]
-    pub struct BridgeFailed {
-        #[ink(topic)]
-        pub request_id: u64,
-        #[ink(topic)]
-        pub token_id: TokenId,
-        pub error: String,
-    }
-
-    #[ink(event)]
-    pub struct BridgeRecovered {
-        #[ink(topic)]
-        pub request_id: u64,
-        #[ink(topic)]
-        pub recovery_action: RecoveryAction,
-    }
-
-    impl PropertyBridge {
-        /// Creates a new PropertyBridge contract
-        #[ink(constructor)]
-        pub fn new(
-            supported_chains: Vec<ChainId>,
-            min_signatures: u8,
-            max_signatures: u8,
-            default_timeout: u64,
-            gas_limit: u64,
-            property_token_contract: AccountId,
-        ) -> Result<Self, Error> {
-            if supported_chains.is_empty() {
-                return Err(Error::InvalidRequest);
-            }
-            if min_signatures == 0 || min_signatures > max_signatures {
-                return Err(Error::InsufficientSignatures);
-            }
-            if gas_limit == 0 {
-                return Err(Error::GasLimitExceeded);
-            }
-            if default_timeout == 0 {
-                return Err(Error::InvalidRequest);
-            }
-
-            let caller = Self::env().caller();
-            let config = BridgeConfig {
-                supported_chains: supported_chains.clone(),
-                min_signatures_required: min_signatures,
-                max_signatures_required: max_signatures,
-                default_timeout_blocks: default_timeout,
-                gas_limit_per_bridge: gas_limit,
-                emergency_pause: false,
-                metadata_preservation: true,
-            };
-
-            // Initialize chain info for supported chains
-            let mut bridge = Self {
-                config,
-                bridge_requests: Mapping::default(),
-                bridge_history: Mapping::default(),
-                chain_info: Mapping::default(),
-                verified_transactions: Mapping::default(),
-                bridge_operators: vec![caller],
-                request_counter: 0,
-                transaction_counter: 0,
-                admin: caller,
-                trusted_roots: Mapping::default(),
-                property_token_contract,
-            };
-
-            // Set up default chain information
-            for chain_id in supported_chains {
-                let chain_info = ChainBridgeInfo {
-                    chain_id,
-                    chain_name: format!("Chain-{}", chain_id),
-                    bridge_contract_address: None,
-                    is_active: true,
-                    gas_multiplier: 100,    // 1.0x multiplier
-                    confirmation_blocks: 6, // 6 block confirmations
-                    supported_tokens: Vec::new(),
-                };
-                bridge.chain_info.insert(chain_id, &chain_info);
-            }
-
-            Ok(bridge)
+#[contractimpl]
+impl PropertyBridge {
+    pub fn init(
+        env: Env,
+        admin: Address,
+        supported_chains: Vec<u32>,
+        min_signatures: u32,
+        max_signatures: u32,
+        default_timeout: u64,
+        gas_limit: u64,
+    ) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("Already initialized");
         }
 
-        /// Initiates a bridge request with multi-signature requirement
-        #[ink(message)]
-        #[must_use]
-        pub fn initiate_bridge_multisig(
-            &mut self,
-            token_id: TokenId,
-            destination_chain: ChainId,
-            recipient: AccountId,
-            required_signatures: u8,
-            timeout_blocks: Option<u64>,
-            metadata: PropertyMetadata,
-        ) -> Result<u64, Error> {
-            let caller = self.env().caller();
-
-            // Check if bridge is paused
-            if self.config.emergency_pause {
-                return Err(Error::BridgePaused);
-            }
-
-            // Validate destination chain
-            if !self.config.supported_chains.contains(&destination_chain) {
-                return Err(Error::InvalidChain);
-            }
-
-            // Validate signature requirements
-            if required_signatures < self.config.min_signatures_required
-                || required_signatures > self.config.max_signatures_required
-            {
-                return Err(Error::InsufficientSignatures);
-            }
-
-            // Check if caller is authorized (token owner or approved operator)
-            if !self.is_authorized_for_token(caller, token_id) {
-                return Err(Error::Unauthorized);
-            }
-
-            // Create bridge request
-            self.request_counter += 1;
-            let request_id = self.request_counter;
-            let current_block = u64::from(self.env().block_number());
-            let expires_at = timeout_blocks.map(|blocks| current_block + blocks);
-
-            let request = MultisigBridgeRequest {
-                request_id,
-                token_id,
-                source_chain: self.get_current_chain_id(),
-                destination_chain,
-                sender: caller,
-                recipient,
-                required_signatures,
-                signatures: Vec::new(),
-                created_at: current_block,
-                expires_at,
-                locked_at_block: None,
-                status: BridgeOperationStatus::Pending,
-                metadata,
-            };
-
-            self.bridge_requests.insert(request_id, &request);
-
-            self.env().emit_event(BridgeRequestCreated {
-                request_id,
-                token_id,
-                source_chain: request.source_chain,
-                destination_chain,
-                requester: caller,
-            });
-
-            Ok(request_id)
-        }
-
-        /// Signs a bridge request
-        #[ink(message)]
-        pub fn sign_bridge_request(&mut self, request_id: u64, approve: bool) -> Result<(), Error> {
-            let caller = self.env().caller();
-
-            // Check if caller is a bridge operator
-            if !self.bridge_operators.contains(&caller) {
-                return Err(Error::Unauthorized);
-            }
-
-            let mut request = self
-                .bridge_requests
-                .get(request_id)
-                .ok_or(Error::InvalidRequest)?;
-
-            // Check if request has expired
-            if let Some(expires_at) = request.expires_at {
-                if u64::from(self.env().block_number()) > expires_at {
-                    return Err(Error::RequestExpired);
-                }
-            }
-
-            // Check if already signed
-            if request.signatures.contains(&caller) {
-                return Err(Error::AlreadySigned);
-            }
-
-            // Add signature
-            request.signatures.push(caller);
-
-            // Update status based on approval and signatures collected
-            if !approve {
-                request.status = BridgeOperationStatus::Failed;
-            } else if request.signatures.len() >= request.required_signatures as usize {
-                request.status = BridgeOperationStatus::Locked;
-                request.locked_at_block = Some(self.env().block_number().into());
-            }
-
-            self.bridge_requests.insert(request_id, &request);
-
-            self.env().emit_event(BridgeRequestSigned {
-                request_id,
-                signer: caller,
-                signatures_collected: request.signatures.len() as u8,
-                signatures_required: request.required_signatures,
-            });
-
-            Ok(())
-        }
-
-        /// Executes a bridge request after collecting required signatures
-        #[ink(message)]
-        pub fn execute_bridge(&mut self, request_id: u64) -> Result<(), Error> {
-            let caller = self.env().caller();
-
-            // Check if caller is a bridge operator
-            if !self.bridge_operators.contains(&caller) {
-                return Err(Error::Unauthorized);
-            }
-
-            let mut request = self
-                .bridge_requests
-                .get(request_id)
-                .ok_or(Error::InvalidRequest)?;
-
-            // Check if request is ready for execution
-            if request.status != BridgeOperationStatus::Locked {
-                return Err(Error::InvalidRequest);
-            }
-
-            // Check if enough signatures are collected
-            if request.signatures.len() < request.required_signatures as usize {
-                return Err(Error::InsufficientSignatures);
-            }
-
-            // Check for confirmation depth (reorg protection)
-            if let Some(locked_at) = request.locked_at_block {
-                let current_block = u64::from(self.env().block_number());
-                let dest_chain_info = self.chain_info.get(request.destination_chain).ok_or(Error::InvalidChain)?;
-                if current_block < locked_at + dest_chain_info.confirmation_blocks as u64 {
-                    return Err(Error::NotEnoughConfirmations);
-                }
-            } else {
-                return Err(Error::InvalidRequest);
-            }
-
-            // Generate transaction hash
-            let transaction_hash = self.generate_transaction_hash(&request);
-
-            // Create bridge transaction record
-            self.transaction_counter += 1;
-            let transaction = BridgeTransaction {
-                transaction_id: self.transaction_counter,
-                token_id: request.token_id,
-                source_chain: request.source_chain,
-                destination_chain: request.destination_chain,
-                sender: request.sender,
-                recipient: request.recipient,
-                transaction_hash,
-                timestamp: self.env().block_timestamp(),
-                gas_used: self.estimate_gas_usage(&request),
-                status: BridgeOperationStatus::InTransit,
-                metadata: request.metadata.clone(),
-            };
-
-            // Update request status
-            request.status = BridgeOperationStatus::Completed;
-            self.bridge_requests.insert(request_id, &request);
-
-            // Store transaction verification
-            self.verified_transactions.insert(transaction_hash, &true);
-
-            // Add to bridge history
-            let mut history = self.bridge_history.get(request.sender).unwrap_or_default();
-            history.push(transaction.clone());
-            self.bridge_history.insert(request.sender, &history);
-
-            self.env().emit_event(BridgeExecuted {
-                request_id,
-                token_id: request.token_id,
-                transaction_hash,
-            });
-
-            // Monitoring: alert on large bridge operations (issue #307)
-            // Token IDs above 1000 are treated as high-value for alerting purposes
-            let severity: u8 = if request.token_id > 10_000 { 3 } else if request.token_id > 1_000 { 2 } else { 1 };
-            self.env().emit_event(BridgeVolumeAlert {
-                request_id,
-                token_id: request.token_id,
-                severity,
-            });
-
-            Ok(())
-        }
-
-        /// Recovers from a failed bridge operation
-        #[ink(message)]
-        pub fn recover_failed_bridge(
-            &mut self,
-            request_id: u64,
-            recovery_action: RecoveryAction,
-        ) -> Result<(), Error> {
-            let caller = self.env().caller();
-
-            // Only admin can recover failed bridges
-            if caller != self.admin {
-                return Err(Error::Unauthorized);
-            }
-
-            let mut request = self
-                .bridge_requests
-                .get(request_id)
-                .ok_or(Error::InvalidRequest)?;
-
-            // Check if request is in a failed state
-            if !matches!(
-                request.status,
-                BridgeOperationStatus::Failed | BridgeOperationStatus::Expired
-            ) {
-                return Err(Error::InvalidRequest);
-            }
-
-            // Execute recovery action
-            match recovery_action {
-                RecoveryAction::UnlockToken => {
-                    // Logic to unlock the token would be implemented here
-                    // This would typically call back to the property token contract
-                }
-                RecoveryAction::RefundGas => {
-                    // Logic to refund gas costs would be implemented here
-                }
-                RecoveryAction::RetryBridge => {
-                    // Reset request to pending for retry
-                    request.status = BridgeOperationStatus::Pending;
-                    request.signatures.clear();
-                }
-                RecoveryAction::CancelBridge => {
-                    // Mark as cancelled
-                    request.status = BridgeOperationStatus::Failed;
-                }
-            }
-
-            self.bridge_requests.insert(request_id, &request);
-
-            self.env().emit_event(BridgeRecovered {
-                request_id,
-                recovery_action,
-            });
-
-            Ok(())
-        }
-
-        /// Gets gas estimation for a bridge operation
-        #[ink(message)]
-        #[must_use]
-        pub fn estimate_bridge_gas(
-            &self,
-            _token_id: TokenId,
-            destination_chain: ChainId,
-        ) -> Result<u64, Error> {
-            let chain_info = self
-                .chain_info
-                .get(destination_chain)
-                .ok_or(Error::InvalidChain)?;
-
-            let base_gas = self.config.gas_limit_per_bridge;
-            let multiplier = chain_info.gas_multiplier;
-
-            Ok(base_gas * multiplier as u64 / 100)
-        }
-
-        /// Monitors bridge status
-        #[ink(message)]
-        #[must_use]
-        pub fn monitor_bridge_status(&self, request_id: u64) -> Option<BridgeMonitoringInfo> {
-            let request = self.bridge_requests.get(request_id)?;
-
-            Some(BridgeMonitoringInfo {
-                bridge_request_id: request.request_id,
-                token_id: request.token_id,
-                source_chain: request.source_chain,
-                destination_chain: request.destination_chain,
-                status: request.status,
-                created_at: request.created_at,
-                expires_at: request.expires_at,
-                signatures_collected: request.signatures.len() as u8,
-                signatures_required: request.required_signatures,
-                error_message: None,
-            })
-        }
-
-        /// Verifies a bridge transaction
-        #[ink(message)]
-        #[must_use]
-        pub fn verify_bridge_transaction(
-            &self,
-            transaction_hash: Hash,
-            _source_chain: ChainId,
-        ) -> bool {
-            self.verified_transactions
-                .get(transaction_hash)
-                .unwrap_or(false)
-        }
-
-        /// Gets bridge history for an account
-        #[ink(message)]
-        #[must_use]
-        pub fn get_bridge_history(&self, account: AccountId) -> Vec<BridgeTransaction> {
-            self.bridge_history.get(account).unwrap_or_default()
-        }
-
-        /// Adds a bridge operator
-        #[ink(message)]
-        pub fn add_bridge_operator(&mut self, operator: AccountId) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::Unauthorized);
-            }
-
-            if !self.bridge_operators.contains(&operator) {
-                self.bridge_operators.push(operator);
-            }
-
-            Ok(())
-        }
-
-        /// Removes a bridge operator
-        #[ink(message)]
-        pub fn remove_bridge_operator(&mut self, operator: AccountId) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::Unauthorized);
-            }
-
-            self.bridge_operators.retain(|op| op != &operator);
-            Ok(())
-        }
-
-        /// Checks if an account is a bridge operator
-        #[ink(message)]
-        #[must_use]
-        pub fn is_bridge_operator(&self, account: AccountId) -> bool {
-            self.bridge_operators.contains(&account)
-        }
-
-        /// Gets all bridge operators
-        #[ink(message)]
-        #[must_use]
-        pub fn get_bridge_operators(&self) -> Vec<AccountId> {
-            self.bridge_operators.clone()
-        }
-
-        /// Updates bridge configuration (admin only)
-        #[ink(message)]
-        pub fn update_config(&mut self, config: BridgeConfig) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::Unauthorized);
-            }
-
-            self.config = config;
-            Ok(())
-        }
-
-        /// Gets current bridge configuration
-        #[ink(message)]
-        #[must_use]
-        pub fn get_config(&self) -> BridgeConfig {
-            self.config.clone()
-        }
-
-        /// Pauses or unpauses the bridge (admin only)
-        #[ink(message)]
-        pub fn set_emergency_pause(&mut self, paused: bool) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::Unauthorized);
-            }
-
-            self.config.emergency_pause = paused;
-            Ok(())
-        }
-
-        /// Gets chain information
-        #[ink(message)]
-        pub fn get_chain_info(&self, chain_id: ChainId) -> Option<ChainBridgeInfo> {
-            self.chain_info.get(chain_id)
-        }
-
-        /// Updates chain information (admin only)
-        #[ink(message)]
-        pub fn update_chain_info(
-            &mut self,
-            chain_id: ChainId,
-            info: ChainBridgeInfo,
-        ) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::Unauthorized);
-            }
-
-            self.chain_info.insert(chain_id, &info);
-            Ok(())
-        }
-
-        /// Update the trusted Merkle root for a source chain (operator only).
-        /// Operators submit the root after it has been finalised on the source chain.
-        #[ink(message)]
-        pub fn update_trusted_root(
-            &mut self,
-            chain_id: ChainId,
-            root: Hash,
-        ) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if !self.bridge_operators.contains(&caller) {
-                return Err(Error::Unauthorized);
-            }
-            self.trusted_roots.insert(chain_id, &root);
-            self.env().emit_event(TrustedRootUpdated {
+        let config = BridgeConfig {
+            supported_chains: supported_chains.clone(),
+            min_signatures_required: min_signatures,
+            max_signatures_required: max_signatures,
+            default_timeout_blocks: default_timeout,
+            gas_limit_per_bridge: gas_limit,
+            emergency_pause: false,
+            metadata_preservation: true,
+        };
+
+        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::ReqCounter, &0u64);
+        env.storage().instance().set(&DataKey::TxCounter, &0u64);
+
+        let mut operators = Vec::new(&env);
+        operators.push_back(admin.clone());
+        env.storage().instance().set(&DataKey::Operators, &operators);
+
+        for chain_id in supported_chains.iter() {
+            let chain_info = ChainBridgeInfo {
                 chain_id,
-                root,
-                updated_by: caller,
-            });
-            Ok(())
+                chain_name: String::from_str(&env, "Chain"),
+                bridge_contract_address: None,
+                is_active: true,
+                gas_multiplier: 100,
+                confirmation_blocks: 6,
+                supported_tokens: Vec::new(&env),
+            };
+            env.storage()
+                .persistent()
+                .set(&DataKey::ChainInfo(chain_id), &chain_info);
+        }
+    }
+
+    pub fn initiate_bridge_multisig(
+        env: Env,
+        caller: Address,
+        token_id: u64,
+        destination_chain: u32,
+        recipient: Address,
+        required_signatures: u32,
+        timeout_blocks: Option<u64>,
+        metadata: PropertyMetadata,
+    ) -> u64 {
+        caller.require_auth();
+
+        let config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
+        require_not_paused(&config);
+        require_supported_chain(&config, destination_chain);
+        require_valid_signatures(&config, required_signatures);
+
+        let mut counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReqCounter)
+            .unwrap_or(0);
+        counter += 1;
+        env.storage().instance().set(&DataKey::ReqCounter, &counter);
+
+        let current_block = env.ledger().sequence() as u64;
+        let expires_at = timeout_blocks.map(|b| current_block + b);
+
+        let request = MultisigBridgeRequest {
+            request_id: counter,
+            token_id,
+            source_chain: 1,
+            destination_chain,
+            sender: caller.clone(),
+            recipient,
+            required_signatures,
+            signatures: Vec::new(&env),
+            created_at: current_block,
+            expires_at,
+            status: BridgeOperationStatus::Pending,
+            metadata,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Request(counter), &request);
+
+        env.events().publish(
+            (symbol_short!("bridge"), symbol_short!("created")),
+            (counter, token_id, caller),
+        );
+
+        counter
+    }
+
+    pub fn sign_bridge_request(env: Env, operator: Address, request_id: u64, approve: bool) {
+        operator.require_auth();
+        require_operator(&env, &operator);
+
+        let mut request: MultisigBridgeRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Request(request_id))
+            .expect("Request not found");
+
+        if let Some(expires_at) = request.expires_at {
+            if (env.ledger().sequence() as u64) > expires_at {
+                panic!("Request expired");
+            }
         }
 
-        /// Verify a cross-chain message using a Merkle proof against the stored
-        /// trusted root for `source_chain` (issue #309).
-        ///
-        /// The leaf is computed as SHA-256(message_hash || leaf_index).
-        /// Returns `true` when the proof is valid, `false` otherwise.
-        #[ink(message)]
-        pub fn verify_message_proof(
-            &self,
-            source_chain: ChainId,
-            message_hash: Hash,
-            proof: MerkleProof,
-        ) -> Result<bool, Error> {
-            let trusted_root = self
-                .trusted_roots
-                .get(source_chain)
-                .ok_or(Error::InvalidChain)?;
-
-            if trusted_root != proof.root {
-                return Ok(false);
-            }
-
-            Ok(self.verify_merkle_proof(message_hash, &proof))
+        if request.signatures.contains(operator.clone()) {
+            panic!("Already signed");
         }
 
-        /// Execute a bridge request only after its Merkle proof is verified.
-        /// Combines proof verification with execution in a single call (issue #309).
-        #[ink(message)]
-        pub fn execute_bridge_with_proof(
-            &mut self,
-            request_id: u64,
-            proof: MerkleProof,
-        ) -> Result<(), Error> {
-            let request = self
-                .bridge_requests
-                .get(request_id)
-                .ok_or(Error::InvalidRequest)?;
+        request.signatures.push_back(operator);
 
-            // Derive the message hash from the request
-            let message_hash = self.generate_transaction_hash(&request);
-
-            // Verify the Merkle proof against the trusted root for the source chain
-            let valid = self.verify_message_proof(request.source_chain, message_hash, proof)?;
-            if !valid {
-                return Err(Error::InvalidProof);
-            }
-
-            self.execute_bridge(request_id)
-        /// Updates the address of the PropertyToken contract used for ownership
-        /// verification (admin only).
-        ///
-        /// This should only be called when the canonical token contract is
-        /// migrated to a new address. Emitting an event here is intentional so
-        /// that off-chain monitors can detect unexpected changes.
-        #[ink(message)]
-        pub fn set_property_token_contract(
-            &mut self,
-            new_address: AccountId,
-        ) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::Unauthorized);
-            }
-            self.property_token_contract = new_address;
-            Ok(())
+        if !approve {
+            request.status = BridgeOperationStatus::Failed;
+        } else if request.signatures.len() >= request.required_signatures {
+            request.status = BridgeOperationStatus::Locked;
         }
 
-        /// Returns the current PropertyToken contract address used for
-        /// ownership verification.
-        #[ink(message)]
-        pub fn get_property_token_contract(&self) -> AccountId {
-            self.property_token_contract
+        env.storage()
+            .persistent()
+            .set(&DataKey::Request(request_id), &request);
+    }
+
+    pub fn execute_bridge(env: Env, operator: Address, request_id: u64) {
+        operator.require_auth();
+        require_operator(&env, &operator);
+
+        let mut request: MultisigBridgeRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Request(request_id))
+            .expect("Request not found");
+
+        if request.status != BridgeOperationStatus::Locked {
+            panic!("Request not ready");
         }
 
-        // Helper functions
+        let tx_hash = env
+            .crypto()
+            .sha256(&Bytes::from_slice(&env, &request_id.to_be_bytes()));
 
-        /// Verifies that `account` is authorised to bridge `token_id`.
-        ///
-        /// Authorisation is granted when the account is either:
-        ///   1. The current owner of the token, or
-        ///   2. The account that has been explicitly approved by the owner for
-        ///      this specific token.
-        ///
-        /// The check is performed via a cross-contract call to the registered
-        /// `property_token_contract` so that ownership is always read from the
-        /// canonical on-chain source of truth.
-        fn is_authorized_for_token(&self, account: AccountId, token_id: TokenId) -> bool {
-            use ink::env::call::FromAccountId;
-            let token_contract: ink::contract_ref!(PropertyTokenOwnership) =
-                FromAccountId::from_account_id(self.property_token_contract);
+        let mut tx_counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TxCounter)
+            .unwrap_or(0);
+        tx_counter += 1;
+        env.storage().instance().set(&DataKey::TxCounter, &tx_counter);
 
-            // Check direct ownership first (most common path)
-            if let Some(owner) = token_contract.owner_of(token_id) {
-                if owner == account {
-                    return true;
-                }
-            } else {
-                // Token does not exist — deny
-                return false;
+        let transaction = BridgeTransaction {
+            transaction_id: tx_counter,
+            token_id: request.token_id,
+            source_chain: request.source_chain,
+            destination_chain: request.destination_chain,
+            sender: request.sender.clone(),
+            recipient: request.recipient.clone(),
+            transaction_hash: tx_hash.clone(),
+            timestamp: env.ledger().timestamp(),
+            gas_used: 0,
+            status: BridgeOperationStatus::InTransit,
+            metadata: request.metadata.clone(),
+        };
+
+        request.status = BridgeOperationStatus::Completed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Request(request_id), &request);
+        env.storage()
+            .persistent()
+            .set(&DataKey::VerifiedTx(tx_hash.clone()), &true);
+
+        let mut history: Vec<BridgeTransaction> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::History(request.sender.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        if history.len() >= MAX_HISTORY_ITEMS {
+            history.remove(0);
+        }
+        history.push_back(transaction);
+        env.storage()
+            .persistent()
+            .set(&DataKey::History(request.sender.clone()), &history);
+
+        env.events().publish(
+            (symbol_short!("bridge"), symbol_short!("executed")),
+            (request_id, tx_hash),
+        );
+    }
+
+    pub fn recover_failed_bridge(
+        env: Env,
+        admin: Address,
+        request_id: u64,
+        recovery_action: RecoveryAction,
+    ) {
+        admin.require_auth();
+        require_admin(&env, &admin);
+
+        let mut request: MultisigBridgeRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Request(request_id))
+            .expect("Request not found");
+
+        if !matches!(
+            request.status,
+            BridgeOperationStatus::Failed | BridgeOperationStatus::Expired
+        ) {
+            panic!("Request not in failed state");
+        }
+
+        match recovery_action {
+            RecoveryAction::RetryBridge => {
+                request.status = BridgeOperationStatus::Pending;
+                request.signatures = Vec::new(&env);
             }
-
-            // Fall back to checking whether the caller holds an explicit approval
-            if let Some(approved) = token_contract.get_approved(token_id) {
-                if approved == account {
-                    return true;
-                }
+            RecoveryAction::CancelBridge
+            | RecoveryAction::UnlockToken
+            | RecoveryAction::RefundGas => {
+                request.status = BridgeOperationStatus::Failed;
             }
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Request(request_id), &request);
 
             false
         }
@@ -850,10 +351,20 @@ mod bridge {
         }
     }
 
-    /// Implementation of DataMigration for PropertyBridge
-    impl DataMigration for PropertyBridge {
-        type Error = Error;
+    pub fn set_pause(env: Env, admin: Address, paused: bool) {
+        admin.require_auth();
+        require_admin(&env, &admin);
 
+        let mut config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
+        config.emergency_pause = paused;
+        env.storage().instance().set(&DataKey::Config, &config);
+    }
+
+    pub fn get_history(env: Env, account: Address) -> Vec<BridgeTransaction> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::History(account))
+            .unwrap_or(Vec::new(&env))
         /// Pause bridge operations before a migration export/import begins.
         #[ink(message)]
         fn pause_for_migration(&mut self) -> Result<(), Error> {
@@ -905,95 +416,30 @@ mod bridge {
         }
     }
 
-    // Unit tests
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use ink::env::{test, DefaultEnvironment};
+    pub fn add_operator(env: Env, admin: Address, operator: Address) {
+        admin.require_auth();
+        require_admin(&env, &admin);
 
-        fn setup_bridge() -> PropertyBridge {
-            let supported_chains = vec![1, 2, 3];
-            // Use a deterministic dummy address for the property token contract.
-            // Unit tests cannot perform cross-contract calls; the authorization
-            // path is covered by integration / e2e tests.
-            let dummy_token_contract = AccountId::from([0x01u8; 32]);
-            PropertyBridge::new(supported_chains, 2, 5, 100, 500000, dummy_token_contract)
-                .expect("valid constructor args")
+        let mut operators: Vec<Address> =
+            env.storage().instance().get(&DataKey::Operators).unwrap();
+        if !operators.contains(operator.clone()) {
+            operators.push_back(operator);
+            env.storage().instance().set(&DataKey::Operators, &operators);
         }
+    }
 
-        #[ink::test]
-        fn test_constructor_works() {
-            let bridge = setup_bridge();
-            let config = bridge.get_config();
-            assert_eq!(config.min_signatures_required, 2);
-            assert_eq!(config.max_signatures_required, 5);
+    pub fn remove_operator(env: Env, admin: Address, operator: Address) {
+        admin.require_auth();
+        require_admin(&env, &admin);
+
+        let operators: Vec<Address> =
+            env.storage().instance().get(&DataKey::Operators).unwrap();
+        let mut new_operators = Vec::new(&env);
+        for op in operators.iter() {
+            if op != operator {
+                new_operators.push_back(op);
+            }
         }
-
-        #[ink::test]
-        fn test_constructor_stores_property_token_contract() {
-            let bridge = setup_bridge();
-            assert_eq!(
-                bridge.get_property_token_contract(),
-                AccountId::from([0x01u8; 32])
-            );
-        }
-
-        /// Verifies that `initiate_bridge_multisig` returns `Unauthorized` when
-        /// the caller does not own the token.  In unit-test mode the cross-
-        /// contract call to the property-token contract will fail (no contract
-        /// deployed at the dummy address), which the runtime surfaces as a
-        /// panic / trap — the same observable outcome as a rejected call.
-        ///
-        /// Full ownership-check coverage lives in the integration tests.
-        #[ink::test]
-        #[should_panic]
-        fn test_initiate_bridge_unauthorized_panics_without_token_contract() {
-            let mut bridge = setup_bridge();
-            let accounts = test::default_accounts::<DefaultEnvironment>();
-            test::set_caller::<DefaultEnvironment>(accounts.alice);
-
-            let metadata = PropertyMetadata {
-                location: String::from("Test Property"),
-                size: 1000,
-                legal_description: String::from("Test"),
-                valuation: 100000,
-                documents_url: String::from("ipfs://test"),
-            };
-
-            // This will panic because the dummy property_token_contract address
-            // has no code deployed — the cross-contract call cannot succeed.
-            let _ = bridge.initiate_bridge_multisig(1, 2, accounts.bob, 2, Some(50), metadata);
-        }
-
-        #[ink::test]
-        fn test_sign_bridge_request_requires_operator() {
-            let mut bridge = setup_bridge();
-            let accounts = test::default_accounts::<DefaultEnvironment>();
-
-            // Charlie is not a bridge operator — signing should be rejected.
-            test::set_caller::<DefaultEnvironment>(accounts.charlie);
-            let result = bridge.sign_bridge_request(999, true);
-            assert_eq!(result, Err(Error::Unauthorized));
-        }
-
-        #[ink::test]
-        fn test_set_property_token_contract_admin_only() {
-            let mut bridge = setup_bridge();
-            let accounts = test::default_accounts::<DefaultEnvironment>();
-
-            // Non-admin should be rejected.
-            test::set_caller::<DefaultEnvironment>(accounts.bob);
-            let result = bridge.set_property_token_contract(AccountId::from([0x02u8; 32]));
-            assert_eq!(result, Err(Error::Unauthorized));
-
-            // Admin (alice, the deployer) should succeed.
-            test::set_caller::<DefaultEnvironment>(accounts.alice);
-            let result = bridge.set_property_token_contract(AccountId::from([0x02u8; 32]));
-            assert!(result.is_ok());
-            assert_eq!(
-                bridge.get_property_token_contract(),
-                AccountId::from([0x02u8; 32])
-            );
-        }
+        env.storage().instance().set(&DataKey::Operators, &new_operators);
     }
 }
