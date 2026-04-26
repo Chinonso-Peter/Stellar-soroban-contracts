@@ -40,6 +40,7 @@
                 dispute_window_seconds: 604_800,   // #134 – 7 days default
                 arbiter: None,                     // #134 – falls back to admin
                 used_evidence_nonces: Mapping::default(),
+                caller_nonces: Mapping::default(),
                 is_paused: false,
                 pending_pause_after: None,
                 pending_admin: None,
@@ -1024,6 +1025,7 @@
             claim_amount: u128,
             description: String,
             evidence: EvidenceMetadata,
+            nonce: u64,
         ) -> Result<u64, InsuranceError> {
             // Require explicit authorization for this operation
             self.env().require_auth();
@@ -1034,6 +1036,12 @@
             // Check if contract is paused
             if self.is_paused {
                 return Err(InsuranceError::ContractPaused);
+            }
+
+            // #349 – per-caller monotonic nonce check (prevents replay / double-execution)
+            let expected_nonce = self.caller_nonces.get(&caller).unwrap_or(0);
+            if nonce != expected_nonce {
+                return Err(InsuranceError::NonceAlreadyUsed);
             }
 
             // Input validation for claim amount
@@ -1164,6 +1172,14 @@
 
             // Record per-caller timestamp for rate limiting (#300)
             self.caller_last_claim.insert(&caller, &now);
+
+            // #349 – increment caller nonce so the same nonce cannot be reused
+            self.caller_nonces.insert(&caller, &(expected_nonce.saturating_add(1)));
+            self.env().emit_event(ReplayProtected {
+                caller,
+                nonce: expected_nonce,
+                claim_id,
+            });
 
             self.env().emit_event(ClaimSubmitted {
                 claim_id,
@@ -2117,6 +2133,13 @@
         #[ink(message)]
         pub fn get_claim(&self, claim_id: u64) -> Option<InsuranceClaim> {
             self.claims.get(&claim_id)
+        }
+
+        /// Return the next expected nonce for `caller`. (#349)
+        /// Callers must pass this value as the `nonce` argument to `submit_claim`.
+        #[ink(message)]
+        pub fn get_nonce(&self, caller: AccountId) -> u64 {
+            self.caller_nonces.get(&caller).unwrap_or(0)
         }
         
         /// Step 1 of 2: propose pausing the contract.

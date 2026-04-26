@@ -299,7 +299,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         let result = contract.cancel_policy(policy_id);
@@ -328,7 +328,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         test::set_caller::<DefaultEnvironment>(accounts.charlie);
@@ -360,14 +360,14 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         let result = contract.submit_claim(
             policy_id,
             10_000_000_000u128,
             "Fire damage to property".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert!(result.is_ok());
         let claim_id = result.unwrap();
@@ -399,14 +399,14 @@
                 coverage,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         let result = contract.submit_claim(
             policy_id,
             coverage * 2,
             "Huge fire".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert_eq!(result, Err(InsuranceError::ClaimExceedsCoverage));
     }
@@ -431,7 +431,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         test::set_caller::<DefaultEnvironment>(accounts.charlie);
@@ -439,7 +439,7 @@
             policy_id,
             1_000u128,
             "Fraud attempt".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert_eq!(result, Err(InsuranceError::Unauthorized));
     }
@@ -469,7 +469,7 @@
                 coverage,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         let claim_id = contract
@@ -477,7 +477,7 @@
                 policy_id,
                 10_000_000_000u128,
                 "Fire damage".into(),
-                valid_evidence(),
+                valid_evidence(), 0,
             )
             .unwrap();
         test::set_caller::<DefaultEnvironment>(accounts.alice);
@@ -509,7 +509,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         let claim_id = contract
@@ -517,7 +517,7 @@
                 policy_id,
                 5_000_000_000u128,
                 "Fraudulent claim".into(),
-                "ipfs://fake-evidence".into(),
+                "ipfs://fake-evidence".into(), 0,
             )
             .unwrap();
         test::set_caller::<DefaultEnvironment>(accounts.alice);
@@ -552,11 +552,11 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         let claim_id = contract
-            .submit_claim(policy_id, 1_000_000u128, "Damage".into(), "ipfs://e".into())
+            .submit_claim(policy_id, 1_000_000u128, "Damage".into(), "ipfs://e".into(), 0)
             .unwrap();
         test::set_caller::<DefaultEnvironment>(accounts.charlie);
         let result = contract.process_claim(claim_id, true, "ipfs://r".into(), String::new());
@@ -583,11 +583,11 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         let claim_id = contract
-            .submit_claim(policy_id, 1_000_000u128, "Damage".into(), "ipfs://e".into())
+            .submit_claim(policy_id, 1_000_000u128, "Damage".into(), "ipfs://e".into(), 0)
             .unwrap();
         test::set_caller::<DefaultEnvironment>(accounts.alice);
         contract.authorize_assessor(accounts.charlie).unwrap();
@@ -623,7 +623,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://cooldown".into(),
+                "ipfs://cooldown".into(), 0,
             )
             .unwrap();
 
@@ -632,7 +632,7 @@
                 policy_id,
                 100_000u128,
                 "Initial loss".into(),
-                valid_evidence(),
+                valid_evidence(), 0,
             )
             .unwrap();
 
@@ -651,7 +651,7 @@
             policy_id,
             100_000u128,
             "Retry too early".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert_eq!(early_retry, Err(InsuranceError::CooldownPeriodActive));
 
@@ -662,7 +662,7 @@
             policy_id,
             100_000u128,
             "Retry at boundary".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert!(boundary_retry.is_ok());
     }
@@ -730,7 +730,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         let token = contract.get_token(1).unwrap();
@@ -759,7 +759,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         // Bob lists token 1
@@ -916,7 +916,7 @@
                 100u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://p".into(),
+                "ipfs://p".into(), 0,
             )
             .unwrap();
 
@@ -951,7 +951,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://m".into(),
+                "ipfs://m".into(), 0,
             )
             .unwrap();
 
@@ -1001,7 +1001,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://m".into(),
+                "ipfs://m".into(), 0,
             )
             .unwrap();
 
@@ -1052,7 +1052,7 @@
                 100u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://p".into(),
+                "ipfs://p".into(), 0,
             )
             .unwrap();
 
@@ -1117,7 +1117,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://m".into(),
+                "ipfs://m".into(), 0,
             )
             .unwrap();
 
@@ -1167,7 +1167,7 @@
                 coverage,
                 pool_id,
                 86_400 * 365,
-                "ipfs://policy-7".into(),
+                "ipfs://policy-7".into(), 0,
             )
             .unwrap();
 
@@ -1192,7 +1192,7 @@
             policy_id,
             calc.deductible.saturating_add(50_000_000_000u128),
             "Should fail before token transfer".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert_eq!(unauthorized_pre_transfer, Err(InsuranceError::Unauthorized));
 
@@ -1218,7 +1218,7 @@
             policy_id,
             calc.deductible.saturating_add(50_000_000_000u128),
             "Former holder".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert_eq!(old_holder_submit, Err(InsuranceError::Unauthorized));
 
@@ -1229,7 +1229,7 @@
                 policy_id,
                 claim_amount,
                 "Fire spread through the upper floor".into(),
-                valid_evidence(),
+                valid_evidence(), 0,
             )
             .unwrap();
 
@@ -1320,7 +1320,7 @@
                 coverage,
                 pool_id,
                 1_000,
-                "ipfs://policy-11".into(),
+                "ipfs://policy-11".into(), 0,
             )
             .unwrap();
 
@@ -1328,7 +1328,7 @@
             policy_id,
             coverage.saturating_add(1),
             "Coverage overflow".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert_eq!(excessive_claim, Err(InsuranceError::ClaimExceedsCoverage));
 
@@ -1338,7 +1338,7 @@
                 policy_id,
                 claim_amount,
                 "Minor fire claim".into(),
-                valid_evidence(),
+                valid_evidence(), 0,
             )
             .unwrap();
 
@@ -1365,7 +1365,7 @@
         test::set_block_timestamp::<DefaultEnvironment>(policy_after_rejection.end_time + 1);
         test::set_caller::<DefaultEnvironment>(accounts.bob);
         let expired_claim =
-            contract.submit_claim(policy_id, claim_amount, "Too late".into(), valid_evidence());
+            contract.submit_claim(policy_id, claim_amount, "Too late".into(), valid_evidence(), 0);
         assert_eq!(expired_claim, Err(InsuranceError::PolicyExpired));
 
         let second_review_attempt =
@@ -1400,7 +1400,7 @@
                 100_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://p1".into(),
+                "ipfs://p1".into(), 0,
             )
             .unwrap();
         contract
@@ -1410,7 +1410,7 @@
                 100_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://p2".into(),
+                "ipfs://p2".into(), 0,
             )
             .unwrap();
         let property_policies = contract.get_property_policies(1);
@@ -1442,7 +1442,7 @@
                 100_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://p1".into(),
+                "ipfs://p1".into(), 0,
             )
             .unwrap();
         contract
@@ -1452,7 +1452,7 @@
                 100_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://p2".into(),
+                "ipfs://p2".into(), 0,
             )
             .unwrap();
         let holder_policies = contract.get_policyholder_policies(accounts.bob);
@@ -1488,7 +1488,7 @@
                 pool_id,
                 86400 * 30,
                 101,
-                "ipfs://parametric".into(),
+                "ipfs://parametric".into(), 0,
             )
             .unwrap();
 
@@ -1500,7 +1500,7 @@
             policy_id,
             10_000_000_000u128,
             "Parametric trigger".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
 
         assert!(result.is_ok());
@@ -1548,7 +1548,7 @@
                 policy_id,
                 50_000_000_000u128,
                 format!("Test claim {}", i),
-                valid_evidence(),
+                valid_evidence(), 0,
             );
             assert!(claim_result.is_ok());
             claim_ids.push(claim_result.unwrap());
@@ -1613,7 +1613,7 @@
                 policy_id,
                 50_000_000_000u128,
                 format!("Test claim {}", i),
-                valid_evidence(),
+                valid_evidence(), 0,
             );
             assert!(claim_result.is_ok());
             claim_ids.push(claim_result.unwrap());
@@ -1676,7 +1676,7 @@
             policy_id,
             50_000_000_000u128,
             "Valid claim".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert!(claim_result.is_ok());
         let valid_claim_id = claim_result.unwrap();
@@ -1771,7 +1771,7 @@
             policy_id,
             50_000_000_000u128,
             "Test claim".into(),
-            valid_evidence(),
+            valid_evidence(), 0,
         );
         assert!(claim_result.is_ok());
         let claim_id = claim_result.unwrap();
@@ -1806,40 +1806,30 @@
     // SECURITY FIX TESTS
     // =========================================================================
 
-    // Test 1: Nonce Replay Attack Prevention
+    // Test 1: Nonce Replay Attack Prevention (#349)
     #[ink::test]
     fn test_nonce_replay_prevention() {
         let mut contract = setup();
         let accounts = test::default_accounts::<DefaultEnvironment>();
         let policy_id = setup_policy_for_bob(&mut contract);
         test::set_caller::<DefaultEnvironment>(accounts.bob);
-        
-        // Submit first claim with nonce "nonce-1"
-        let evidence1 = EvidenceMetadata {
-            evidence_type: "photo".into(),
-            uri: "ipfs://evidence1".into(),
-            hash: vec![1u8; 32],
-            nonce: "nonce-1".into(),
-            description: "First claim".into(),
-        };
-        let claim1 = contract.submit_claim(policy_id, 1_000u128, "desc1".into(), evidence1);
+
+        // First submission with nonce 0 succeeds
+        let claim1 = contract.submit_claim(
+            policy_id, 1_000u128, "desc1".into(), make_evidence("ipfs://e1"), 0,
+        );
         assert!(claim1.is_ok());
-        
-        // Try to submit same claim with different nonce - should FAIL (nonce tracked per policy)
-        let evidence2 = EvidenceMetadata {
-            evidence_type: "photo".into(),
-            uri: "ipfs://evidence1".into(),
-            hash: vec![1u8; 32],
-            nonce: "nonce-1".into(), // Same nonce!
-            description: "Duplicate claim".into(),
-        };
-        let claim2 = contract.submit_claim(policy_id, 1_000u128, "desc2".into(), evidence2);
-        assert_eq!(claim2, Err(InsuranceError::NonceAlreadyUsed));
+
+        // Replaying nonce 0 must fail
+        let replay = contract.submit_claim(
+            policy_id, 1_000u128, "desc2".into(), make_evidence("ipfs://e2"), 0,
+        );
+        assert_eq!(replay, Err(InsuranceError::NonceAlreadyUsed));
     }
 
-    // Test 2: Different nonces allowed
+    // Test 2: Sequential nonces are accepted (#349)
     #[ink::test]
-    fn test_different_nonces_allowed() {
+    fn test_sequential_nonces_allowed() {
         let mut contract = setup();
         let accounts = test::default_accounts::<DefaultEnvironment>();
         let pool_id = create_pool(&mut contract);
@@ -1861,22 +1851,46 @@
                 "ipfs://test".into(),
             )
             .unwrap();
-        
-        // Submit first claim with nonce "nonce-1"
-        let evidence1 = make_evidence("ipfs://evidence1");
-        let claim1 = contract.submit_claim(policy_id, 1_000u128, "desc1".into(), evidence1);
+
+        // nonce 0 succeeds; nonce counter advances to 1
+        let claim1 = contract.submit_claim(
+            policy_id, 1_000u128, "desc1".into(), make_evidence("ipfs://e1"), 0,
+        );
         assert!(claim1.is_ok());
-        
-        // Submit second claim with different nonce "nonce-2" - should succeed
-        let evidence2 = EvidenceMetadata {
-            evidence_type: "photo".into(),
-            uri: "ipfs://evidence2".into(),
-            hash: vec![2u8; 32],
-            nonce: "nonce-2".into(), // Different nonce
-            description: "Second claim".into(),
-        };
-        let claim2 = contract.submit_claim(policy_id, 2_000u128, "desc2".into(), evidence2);
+        assert_eq!(contract.get_nonce(accounts.bob), 1);
+
+        // nonce 1 succeeds; nonce counter advances to 2
+        // (advance time past cooldown first)
+        test::set_block_timestamp::<DefaultEnvironment>(3_000_000 + 2_592_001);
+        let claim2 = contract.submit_claim(
+            policy_id, 1_000u128, "desc2".into(), make_evidence("ipfs://e2"), 1,
+        );
         assert!(claim2.is_ok());
+        assert_eq!(contract.get_nonce(accounts.bob), 2);
+    }
+
+    // Test 3: get_nonce returns 0 for new callers (#349)
+    #[ink::test]
+    fn test_get_nonce_initial_value() {
+        let contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        assert_eq!(contract.get_nonce(accounts.bob), 0);
+        assert_eq!(contract.get_nonce(accounts.charlie), 0);
+    }
+
+    // Test 4: Wrong nonce rejected (#349)
+    #[ink::test]
+    fn test_wrong_nonce_rejected() {
+        let mut contract = setup();
+        let accounts = test::default_accounts::<DefaultEnvironment>();
+        let policy_id = setup_policy_for_bob(&mut contract);
+        test::set_caller::<DefaultEnvironment>(accounts.bob);
+
+        // Supplying nonce 1 when expected is 0
+        let result = contract.submit_claim(
+            policy_id, 1_000u128, "desc".into(), make_evidence("ipfs://e"), 1,
+        );
+        assert_eq!(result, Err(InsuranceError::NonceAlreadyUsed));
     }
 
     // Test 3: Dispute Deadline Set on Submission
@@ -1888,7 +1902,7 @@
         test::set_caller::<DefaultEnvironment>(accounts.bob);
         
         let claim_id = contract
-            .submit_claim(policy_id, 1_000u128, "desc".into(), make_evidence("ipfs://e"))
+            .submit_claim(policy_id, 1_000u128, "desc".into(), make_evidence("ipfs://e"), 0)
             .unwrap();
         
         let claim = contract.get_claim(claim_id).unwrap();
@@ -1910,7 +1924,7 @@
         let policy_id = setup_policy_for_bob(&mut contract);
         test::set_caller::<DefaultEnvironment>(accounts.bob);
         let claim_id = contract
-            .submit_claim(policy_id, 1_000u128, "desc".into(), make_evidence("ipfs://e"))
+            .submit_claim(policy_id, 1_000u128, "desc".into(), make_evidence("ipfs://e"), 0)
             .unwrap();
         
         // Advance time past dispute window
@@ -1940,6 +1954,7 @@
             1_000u128,
             "desc".into(),
             make_evidence("ipfs://e"),
+            0,
         );
         assert_eq!(result, Err(InsuranceError::ContractPaused));
     }
@@ -1995,6 +2010,7 @@
             1_000u128,
             "desc".into(),
             make_evidence("ipfs://e"),
+            0,
         );
         assert!(result.is_ok());
     }
@@ -2023,7 +2039,7 @@
         let policy_id = setup_policy_for_bob(&mut contract);
         test::set_caller::<DefaultEnvironment>(accounts.bob);
         let claim_id = contract
-            .submit_claim(policy_id, 1_000u128, "desc".into(), make_evidence("ipfs://e"))
+            .submit_claim(policy_id, 1_000u128, "desc".into(), make_evidence("ipfs://e"), 0)
             .unwrap();
         
         // Pause
@@ -2122,7 +2138,7 @@
                 500_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         
@@ -2156,14 +2172,14 @@
                 100_000_000_000u128,
                 pool_id,
                 86_400 * 365,
-                "ipfs://test".into(),
+                "ipfs://test".into(), 0,
             )
             .unwrap();
         
         // Submit and approve claim to reduce available_capital
         test::set_caller::<DefaultEnvironment>(accounts.bob);
         let claim_id = contract
-            .submit_claim(policy_id, 10_000_000_000u128, "damage".into(), make_evidence("ipfs://e"))
+            .submit_claim(policy_id, 10_000_000_000u128, "damage".into(), make_evidence("ipfs://e"), 0)
             .unwrap();
         
         test::set_caller::<DefaultEnvironment>(accounts.alice);

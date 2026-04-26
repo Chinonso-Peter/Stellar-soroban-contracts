@@ -517,6 +517,10 @@ mod propchain_insurance {
         // Security: track used evidence nonces to prevent replay attacks
         used_evidence_nonces: Mapping<(u64, String), bool>, // (property_id, nonce) -> bool
         
+        // Per-caller monotonic nonce counter for replay protection (#349)
+        // Callers must supply their current nonce; it is incremented on each accepted submit_claim.
+        caller_nonces: Mapping<AccountId, u64>,
+        
         // Emergency pause mechanism
         is_paused: bool,
         // Time-lock for admin operations (#301)
@@ -822,6 +826,15 @@ mod propchain_insurance {
         #[ink(topic)]
         new_admin: AccountId,
         timestamp: u64,
+    }
+
+    /// Emitted when a claim submission is accepted and the caller nonce is consumed (#349)
+    #[ink(event)]
+    pub struct ReplayProtected {
+        #[ink(topic)]
+        caller: AccountId,
+        nonce: u64,
+        claim_id: u64,
     }
 
     /// Emitted when a role is granted to an account (#346)
