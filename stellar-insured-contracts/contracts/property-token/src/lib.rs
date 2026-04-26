@@ -421,6 +421,20 @@ mod property_token {
             Ok(())
         }
 
+        /// Upgrades the contract code to the provided `code_hash`.
+        /// Only the admin can perform this operation.
+        #[ink(message)]
+        pub fn set_code_hash(&mut self, code_hash: Hash) -> Result<(), Error> {
+            let caller = self.env().caller();
+            if caller != self.admin {
+                return Err(Error::Unauthorized);
+            }
+            self.env()
+                .set_code_hash(&code_hash)
+                .map_err(|_| Error::InvalidRequest)?;
+            Ok(())
+        }
+
         #[ink(message)]
         pub fn total_shares(&self, token_id: TokenId) -> u128 {
             self.total_shares.get(token_id).unwrap_or(0)
