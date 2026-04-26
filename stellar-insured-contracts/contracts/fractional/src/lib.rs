@@ -135,6 +135,7 @@ mod fractional {
     }
 
     impl Fractional {
+        /// Create an empty fractional ownership ledger with the deployer as admin.
         #[ink(constructor)]
         pub fn new() -> Self {
             Self {
@@ -150,17 +151,20 @@ mod fractional {
             }
         }
 
+        /// Store the most recent observed share price for a property token.
         #[ink(message)]
         pub fn set_last_price(&mut self, token_id: u64, price_per_share: u128) {
             self.last_prices.insert(token_id, &price_per_share);
             self.env().emit_event(PriceUpdated { token_id, price_per_share });
         }
 
+        /// Return the latest stored share price for a property token, if one exists.
         #[ink(message)]
         pub fn get_last_price(&self, token_id: u64) -> Option<u128> {
             self.last_prices.get(token_id)
         }
 
+        /// Calculate a portfolio value using supplied prices or the contract's last stored prices.
         #[ink(message)]
         pub fn aggregate_portfolio(&self, items: Vec<PortfolioItem>) -> PortfolioAggregation {
             let mut total: u128 = 0;
@@ -181,6 +185,7 @@ mod fractional {
             }
         }
 
+        /// Summarize taxable dividend and sale proceeds into a compact report.
         #[ink(message)]
         pub fn summarize_tax(
             &self,
@@ -202,6 +207,7 @@ mod fractional {
             }
         }
 
+        /// Mint fractional shares for an authorized token minter.
         #[ink(message)]
         pub fn mint(&mut self, token_id: u64, to: AccountId, amount: u128) -> Result<(), Error> {
             let caller = self.env().caller();
@@ -222,6 +228,7 @@ mod fractional {
             Ok(())
         }
 
+        /// Burn fractional shares from an account controlled by the caller or admin.
         #[ink(message)]
         pub fn burn(&mut self, token_id: u64, from: AccountId, amount: u128) -> Result<(), Error> {
             let caller = self.env().caller();
@@ -244,6 +251,7 @@ mod fractional {
             Ok(())
         }
 
+        /// Transfer fractional shares between KYC-approved accounts.
         #[ink(message)]
         pub fn transfer(&mut self, token_id: u64, to: AccountId, amount: u128) -> Result<(), Error> {
             let from = self.env().caller();
@@ -266,16 +274,19 @@ mod fractional {
             Ok(())
         }
 
+        /// Return the fractional share balance for an account and token.
         #[ink(message)]
         pub fn balance_of(&self, token_id: u64, account: AccountId) -> u128 {
             self.balances.get((token_id, account)).unwrap_or(0)
         }
 
+        /// Return the total fractional supply minted for a token.
         #[ink(message)]
         pub fn total_supply_of(&self, token_id: u64) -> u128 {
             self.total_supply.get(token_id).unwrap_or(0)
         }
 
+        /// Add distributable dividends for a token based on current supply.
         #[ink(message)]
         pub fn distribute_dividends(&mut self, token_id: u64, total_dividend: u128) -> Result<(), Error> {
             let caller = self.env().caller();
@@ -294,6 +305,7 @@ mod fractional {
             Ok(())
         }
 
+        /// Claim the caller's unclaimed dividends for a token.
         #[ink(message)]
         pub fn claim_dividends(&mut self, token_id: u64) -> Result<u128, Error> {
             let account = self.env().caller();
@@ -309,6 +321,7 @@ mod fractional {
             Ok(total_dividend)
         }
 
+        /// Update KYC eligibility for an account; only the admin may call this.
         #[ink(message)]
         pub fn set_kyc(&mut self, account: AccountId, passed: bool) -> Result<(), Error> {
             let caller = self.env().caller();
@@ -320,6 +333,7 @@ mod fractional {
             Ok(())
         }
 
+        /// Assign the account allowed to mint shares for a token.
         #[ink(message)]
         pub fn set_authorized_minter(&mut self, token_id: u64, minter: AccountId) -> Result<(), Error> {
             let caller = self.env().caller();
@@ -331,6 +345,7 @@ mod fractional {
             Ok(())
         }
 
+        /// Store the governance contract that coordinates fractional ownership decisions.
         #[ink(message)]
         pub fn set_governance_contract(&mut self, gov_contract: AccountId) -> Result<(), Error> {
             let caller = self.env().caller();

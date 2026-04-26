@@ -411,6 +411,7 @@ mod property_token {
             ))
         }
 
+        /// Configure the external compliance registry used before share transfers.
         #[ink(message)]
         pub fn set_compliance_registry(&mut self, registry: AccountId) -> Result<(), Error> {
             let caller = self.env().caller();
@@ -435,16 +436,19 @@ mod property_token {
             Ok(())
         }
 
+        /// Return the total fractional shares issued for a property token.
         #[ink(message)]
         pub fn total_shares(&self, token_id: TokenId) -> u128 {
             self.total_shares.get(token_id).unwrap_or(0)
         }
 
+        /// Return a holder's fractional share balance for a property token.
         #[ink(message)]
         pub fn share_balance_of(&self, owner: AccountId, token_id: TokenId) -> u128 {
             self.balances.get((owner, token_id)).unwrap_or(0)
         }
 
+        /// Issue fractional shares to an account when called by the admin or token owner.
         #[ink(message)]
         pub fn issue_shares(
             &mut self,
@@ -475,6 +479,7 @@ mod property_token {
             Ok(())
         }
 
+        /// Redeem fractional shares from an owner or approved operator.
         #[ink(message)]
         pub fn redeem_shares(
             &mut self,
@@ -507,6 +512,7 @@ mod property_token {
             Ok(())
         }
 
+        /// Transfer fractional shares after authorization and compliance checks.
         #[ink(message)]
         pub fn transfer_shares(
             &mut self,
@@ -539,6 +545,7 @@ mod property_token {
             Ok(())
         }
 
+        /// Deposit native value as dividends to be distributed across token shares.
         #[ink(message, payable)]
         pub fn deposit_dividends(&mut self, token_id: TokenId) -> Result<(), Error> {
             let value = self.env().transferred_value();
@@ -562,6 +569,7 @@ mod property_token {
             Ok(())
         }
 
+        /// Withdraw dividends accrued to the caller for a property token.
         #[ink(message)]
         pub fn withdraw_dividends(&mut self, token_id: TokenId) -> Result<u128, Error> {
             let caller = self.env().caller();
@@ -594,6 +602,7 @@ mod property_token {
             }
         }
 
+        /// Create a token-holder governance proposal for a property token.
         #[ink(message)]
         pub fn create_proposal(
             &mut self,
@@ -627,6 +636,7 @@ mod property_token {
             Ok(counter)
         }
 
+        /// Cast a weighted vote using the caller's current fractional share balance.
         #[ink(message)]
         pub fn vote(
             &mut self,
@@ -668,6 +678,7 @@ mod property_token {
             Ok(())
         }
 
+        /// Finalize a proposal by comparing votes against quorum and opposition.
         #[ink(message)]
         pub fn execute_proposal(
             &mut self,
@@ -697,6 +708,7 @@ mod property_token {
             Ok(passed)
         }
 
+        /// Escrow shares and list them for sale at a fixed price per share.
         #[ink(message)]
         pub fn place_ask(
             &mut self,
@@ -734,6 +746,7 @@ mod property_token {
             Ok(())
         }
 
+        /// Cancel the caller's active ask and return escrowed shares.
         #[ink(message)]
         pub fn cancel_ask(&mut self, token_id: TokenId) -> Result<(), Error> {
             let seller = self.env().caller();
@@ -751,6 +764,7 @@ mod property_token {
             Ok(())
         }
 
+        /// Buy escrowed shares from a seller when exact payment is supplied.
         #[ink(message, payable)]
         pub fn buy_shares(
             &mut self,
@@ -820,11 +834,13 @@ mod property_token {
             Ok(())
         }
 
+        /// Return the last recorded trade price for a property token.
         #[ink(message)]
         pub fn get_last_trade_price(&self, token_id: TokenId) -> Option<u128> {
             self.last_trade_price.get(token_id)
         }
 
+        /// Build a compact portfolio view of balances and last trade prices.
         #[ink(message)]
         pub fn get_portfolio(
             &self,
@@ -840,6 +856,7 @@ mod property_token {
             out
         }
 
+        /// Return tax accounting data for an owner and property token.
         #[ink(message)]
         pub fn get_tax_record(&self, owner: AccountId, token_id: TokenId) -> TaxRecord {
             self.tax_records
@@ -851,6 +868,7 @@ mod property_token {
                 })
         }
 
+        /// Check an account against the configured compliance registry when present.
         fn pass_compliance(&self, account: AccountId) -> Result<bool, Error> {
             if let Some(registry) = self.compliance_registry {
                 use ink::env::call::FromAccountId;
@@ -862,6 +880,7 @@ mod property_token {
             }
         }
 
+        /// Sync pending dividends into the holder's claimable balance before balance changes.
         fn update_dividend_credit_on_change(
             &mut self,
             account: AccountId,
@@ -1949,11 +1968,13 @@ mod property_token {
     /// Implement the `PropertyTokenOwnership` trait so the bridge contract can
     /// verify token ownership via a cross-contract call.
     impl PropertyTokenOwnership for PropertyToken {
+        /// Return the token owner for bridge authorization checks.
         #[ink(message)]
         fn owner_of(&self, token_id: TokenId) -> Option<AccountId> {
             self.token_owner.get(token_id)
         }
 
+        /// Return the approved account for bridge authorization checks.
         #[ink(message)]
         fn get_approved(&self, token_id: TokenId) -> Option<AccountId> {
             self.token_approvals.get(token_id)
@@ -1969,6 +1990,7 @@ mod property_token {
     impl DataMigration for PropertyToken {
         type Error = Error;
 
+        /// Pause bridge-related token operations before migration.
         #[ink(message)]
         fn pause_for_migration(&mut self) -> Result<(), Error> {
             self.ensure_admin()?;
@@ -1976,6 +1998,7 @@ mod property_token {
             Ok(())
         }
 
+        /// Resume bridge-related token operations after migration.
         #[ink(message)]
         fn resume_after_migration(&mut self) -> Result<(), Error> {
             self.ensure_admin()?;
@@ -1983,18 +2006,21 @@ mod property_token {
             Ok(())
         }
 
+        /// Export a serialized token storage chunk for migration tooling.
         #[ink(message)]
         fn extract_data_chunk(&self, _chunk_id: u32, _start_index: u32, _count: u32) -> Result<Vec<u8>, Error> {
             self.ensure_admin()?;
             Ok(Vec::new())
         }
 
+        /// Import serialized token storage data during migration.
         #[ink(message)]
         fn initialize_with_migrated_data(&mut self, _data: Vec<u8>) -> Result<(), Error> {
             self.ensure_admin()?;
             Ok(())
         }
 
+        /// Confirm migrated token state is internally consistent.
         #[ink(message)]
         fn verify_migration(&self) -> Result<bool, Error> {
             Ok(true)
@@ -2002,6 +2028,7 @@ mod property_token {
     }
 
     impl PropertyToken {
+        /// Require the caller to be the token admin for privileged operations.
         fn ensure_admin(&self) -> Result<(), Error> {
             if self.env().caller() != self.admin {
                 return Err(Error::Unauthorized);

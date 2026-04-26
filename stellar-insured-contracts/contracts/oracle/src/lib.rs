@@ -622,6 +622,7 @@ mod propchain_oracle {
 
         // Helper methods
 
+        /// Require the caller to be the oracle admin before privileged changes.
         fn ensure_admin(&self) -> Result<(), OracleError> {
             if self.env().caller() != self.admin {
                 return Err(OracleError::Unauthorized);
@@ -629,6 +630,7 @@ mod propchain_oracle {
             Ok(())
         }
 
+        /// Collect fresh price data from each active oracle source for a property.
         fn collect_prices_from_sources(
             &self,
             property_id: u64,
@@ -653,6 +655,7 @@ mod propchain_oracle {
             Ok(prices)
         }
 
+        /// Resolve one source into deterministic price data for aggregation.
         fn get_price_from_source(
             &self,
             source: &OracleSource,
@@ -747,11 +750,13 @@ mod propchain_oracle {
             }
         }
 
+        /// Check whether a source price is inside the configured freshness window.
         fn is_price_fresh(&self, price_data: &PriceData) -> bool {
             let current_time = self.env().block_timestamp();
             current_time.saturating_sub(price_data.timestamp) <= self.max_price_staleness
         }
 
+        /// Aggregate fresh source prices into a weighted average after outlier removal.
         pub fn aggregate_prices(&self, prices: &[PriceData]) -> Result<u128, OracleError> {
             if prices.len() < self.min_sources_required as usize {
                 return Err(OracleError::InsufficientSources);
@@ -789,6 +794,7 @@ mod propchain_oracle {
             Ok(total_weighted_price / total_weight as u128)
         }
 
+        /// Remove prices that fall outside the configured standard-deviation threshold.
         pub fn filter_outliers(&self, prices: &[PriceData]) -> Vec<PriceData> {
             if prices.len() < 3 {
                 return prices.to_vec();
@@ -835,6 +841,7 @@ mod propchain_oracle {
                 .collect()
         }
 
+        /// Return the configured weight for an oracle source.
         fn get_source_weight(&self, source_id: &str) -> Result<u32, OracleError> {
             self.oracle_sources
                 .get(&source_id.to_string())
@@ -842,6 +849,7 @@ mod propchain_oracle {
                 .ok_or(OracleError::OracleSourceNotFound)
         }
 
+        /// Score valuation confidence from source count and price variance.
         pub fn calculate_confidence_score(&self, prices: &[PriceData]) -> Result<u32, OracleError> {
             if prices.is_empty() {
                 return Ok(0);
@@ -894,6 +902,7 @@ mod propchain_oracle {
             Ok(source_confidence + variance_confidence)
         }
 
+        /// Calculate short-term volatility from recent historical valuations.
         fn calculate_volatility(&self, property_id: u64) -> Result<u32, OracleError> {
             let historical = self.get_historical_valuations(property_id, 30); // Last 30 valuations
 
@@ -919,6 +928,7 @@ mod propchain_oracle {
             Ok((avg_change_bp / 100).min(100) as u32) // Convert to percentage
         }
 
+        /// Build a confidence interval around a valuation from its confidence score.
         fn calculate_confidence_interval(
             &self,
             valuation: &PropertyValuation,
@@ -932,12 +942,14 @@ mod propchain_oracle {
             ))
         }
 
+        /// Return the current outlier count for a property.
         fn detect_outliers(&self, _property_id: u64) -> Result<u32, OracleError> {
             // This would implement outlier detection logic
             // For now, return 0
             Ok(0)
         }
 
+        /// Append a valuation to history while retaining the latest 100 entries.
         fn store_historical_valuation(&mut self, property_id: u64, valuation: PropertyValuation) {
             let mut history = self
                 .historical_valuations
@@ -954,6 +966,7 @@ mod propchain_oracle {
             self.historical_valuations.insert(&property_id, &history);
         }
 
+        /// Emit alerts when a valuation moves beyond a configured threshold.
         fn check_price_alerts(
             &mut self,
             property_id: u64,
@@ -982,6 +995,7 @@ mod propchain_oracle {
             Ok(())
         }
 
+        /// Calculate absolute percentage change between two valuation amounts.
         pub fn calculate_percentage_change(&self, old_value: u128, new_value: u128) -> u128 {
             if old_value == 0 {
                 return 0;
@@ -1000,11 +1014,13 @@ mod propchain_oracle {
 
     /// Implementation of the Oracle trait from propchain-traits
     impl propchain_traits::Oracle for PropertyValuationOracle {
+        /// Return the latest valuation through the shared oracle trait.
         #[ink(message)]
         fn get_valuation(&self, property_id: u64) -> Result<PropertyValuation, OracleError> {
             self.get_property_valuation(property_id)
         }
 
+        /// Return valuation data with confidence metrics through the shared oracle trait.
         #[ink(message)]
         fn get_valuation_with_confidence(
             &self,
@@ -1013,11 +1029,13 @@ mod propchain_oracle {
             self.get_valuation_with_confidence(property_id)
         }
 
+        /// Queue a valuation request through the shared oracle trait.
         #[ink(message)]
         fn request_valuation(&mut self, property_id: u64) -> Result<u64, OracleError> {
             self.request_property_valuation(property_id)
         }
 
+        /// Queue multiple valuation requests through the shared oracle trait.
         #[ink(message)]
         fn batch_request_valuations(
             &mut self,
@@ -1026,6 +1044,7 @@ mod propchain_oracle {
             self.batch_request_valuations(property_ids)
         }
 
+        /// Return recent historical valuations through the shared oracle trait.
         #[ink(message)]
         fn get_historical_valuations(
             &self,
@@ -1035,6 +1054,7 @@ mod propchain_oracle {
             self.get_historical_valuations(property_id, limit)
         }
 
+        /// Return market volatility metrics through the shared oracle trait.
         #[ink(message)]
         fn get_market_volatility(
             &self,
@@ -1047,11 +1067,13 @@ mod propchain_oracle {
 
     /// Implementation of the OracleRegistry trait from propchain-traits
     impl propchain_traits::OracleRegistry for PropertyValuationOracle {
+        /// Add an oracle source through the shared registry trait.
         #[ink(message)]
         fn add_source(&mut self, source: OracleSource) -> Result<(), OracleError> {
             self.add_oracle_source(source)
         }
 
+        /// Remove an oracle source from active aggregation.
         #[ink(message)]
         fn remove_source(&mut self, source_id: String) -> Result<(), OracleError> {
             self.ensure_admin()?;
@@ -1060,6 +1082,7 @@ mod propchain_oracle {
             Ok(())
         }
 
+        /// Update an oracle source reputation score after a success or failure.
         #[ink(message)]
         fn update_reputation(
             &mut self,
@@ -1069,11 +1092,13 @@ mod propchain_oracle {
             self.update_source_reputation(source_id, success)
         }
 
+        /// Return the stored reputation score for an oracle source.
         #[ink(message)]
         fn get_reputation(&self, source_id: String) -> Option<u32> {
             self.source_reputations.get(&source_id)
         }
 
+        /// Apply a slashing penalty to an oracle source.
         #[ink(message)]
         fn slash_source(
             &mut self,
@@ -1083,6 +1108,7 @@ mod propchain_oracle {
             self.slash_source(source_id, penalty_amount)
         }
 
+        /// Check whether a new valuation looks anomalous for a property.
         #[ink(message)]
         fn detect_anomalies(&self, property_id: u64, new_valuation: u128) -> bool {
             self.is_anomaly(property_id, new_valuation)
@@ -1090,6 +1116,7 @@ mod propchain_oracle {
     }
 
     impl Default for PropertyValuationOracle {
+        /// Build a default oracle using a zero admin account for tests and tooling.
         fn default() -> Self {
             Self::new(AccountId::from([0x0; 32]))
         }
@@ -1870,6 +1897,7 @@ mod oracle_tests {
     impl DataMigration for PropertyValuationOracle {
         type Error = OracleError;
 
+        /// Pause oracle state changes before migration.
         #[ink(message)]
         fn pause_for_migration(&mut self) -> Result<(), OracleError> {
             self.ensure_admin()?;
@@ -1877,24 +1905,28 @@ mod oracle_tests {
             Ok(())
         }
 
+        /// Resume oracle state changes after migration handling.
         #[ink(message)]
         fn resume_after_migration(&mut self) -> Result<(), OracleError> {
             self.ensure_admin()?;
             Ok(())
         }
 
+        /// Export a serialized oracle storage chunk for migration tooling.
         #[ink(message)]
         fn extract_data_chunk(&self, _chunk_id: u32, _start_index: u32, _count: u32) -> Result<Vec<u8>, OracleError> {
             self.ensure_admin()?;
             Ok(Vec::new())
         }
 
+        /// Import serialized oracle storage data during migration.
         #[ink(message)]
         fn initialize_with_migrated_data(&mut self, _data: Vec<u8>) -> Result<(), OracleError> {
             self.ensure_admin()?;
             Ok(())
         }
 
+        /// Confirm migrated oracle state is internally consistent.
         #[ink(message)]
         fn verify_migration(&self) -> Result<bool, OracleError> {
             Ok(true)

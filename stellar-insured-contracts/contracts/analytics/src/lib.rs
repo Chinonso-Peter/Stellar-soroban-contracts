@@ -85,6 +85,7 @@ mod propchain_analytics {
     }
 
     impl AnalyticsDashboard {
+        /// Create an analytics dashboard with zeroed market metrics and caller as admin.
         #[ink(constructor)]
         pub fn new() -> Self {
             let caller = Self::env().caller();
@@ -106,6 +107,7 @@ mod propchain_analytics {
             self.current_metrics.clone()
         }
 
+        /// Replace the current market aggregate values; only the admin can update them.
         #[ink(message)]
         pub fn update_market_metrics(
             &mut self,
@@ -129,6 +131,7 @@ mod propchain_analytics {
             self.trend_count += 1;
         }
 
+        /// Return all stored market trend records in insertion order.
         #[ink(message)]
         pub fn get_historical_trends(&self) -> Vec<MarketTrend> {
             let mut trends = Vec::new();

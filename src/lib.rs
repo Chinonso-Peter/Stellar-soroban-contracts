@@ -6,6 +6,8 @@ import "./SecurityEvents.sol";
 contract GovernanceManager is SecurityEvents {
     mapping(bytes32 => bool) public executedProposals;
 
+    /// @notice Marks a governance proposal as executed and emits the action for audit tracking.
+    /// @dev Reverts when the proposal ID has already been executed to prevent replayed actions.
     function executeProposal(
         bytes32 proposalId,
         string calldata action

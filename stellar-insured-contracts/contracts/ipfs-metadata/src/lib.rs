@@ -931,6 +931,7 @@ mod ipfs_metadata {
     }
 
     impl Default for IpfsMetadataRegistry {
+        /// Build an empty metadata registry for tests and default construction.
         fn default() -> Self {
             Self::new()
         }

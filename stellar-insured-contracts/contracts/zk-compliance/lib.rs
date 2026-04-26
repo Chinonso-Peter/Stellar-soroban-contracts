@@ -1149,6 +1149,7 @@ mod zk_compliance {
         }
 
         // --- Internal helper functions ---
+        /// Validate proof data using the configured ZK backend or the fallback simulator.
         fn perform_zk_verification(&self, proof: &ZkProofData) -> Result<bool> {
             // This is where the actual ZK proof verification would occur
             // In a real implementation, this would use arkworks or similar libraries
@@ -1178,6 +1179,7 @@ mod zk_compliance {
             }
         }
 
+        /// Decode and verify a submitted proof with arkworks when the `zk` feature is enabled.
         #[cfg(feature = "zk")]
         fn deserialize_and_verify_zk_proof(&self, proof: &ZkProofData) -> core::result::Result<bool, ()> {
             // This function would deserialize the proof data and verify it using arkworks
@@ -1216,7 +1218,7 @@ mod zk_compliance {
             Ok(true)
         }
 
-        // Helper function to load verification keys based on proof type
+        /// Load the verification key associated with a proof type.
         #[cfg(feature = "zk")]
         fn load_verification_key(&self, proof_type: ZkProofType) -> core::result::Result<VerifyingKey<Bn254>, ()> {
             // In a real implementation, this would load the appropriate verification key
@@ -1225,6 +1227,7 @@ mod zk_compliance {
             Err(()) // Not implemented in this example
         }
 
+        /// Increment and return the next proof identifier for an account.
         fn get_next_proof_id(&mut self, account: AccountId) -> u64 {
             let current_id = self.proof_counter.get(account).unwrap_or(0);
             let next_id = current_id + 1;
@@ -1232,6 +1235,7 @@ mod zk_compliance {
             next_id
         }
 
+        /// Require the contract owner before owner-only administration.
         fn ensure_owner(&self) -> Result<()> {
             if self.env().caller() != self.owner {
                 return Err(Error::NotAuthorized);
@@ -1239,6 +1243,7 @@ mod zk_compliance {
             Ok(())
         }
 
+        /// Require the caller to be an approved verifier before proof review.
         fn ensure_approved_verifier(&self) -> Result<()> {
             let caller = self.env().caller();
             if !self.approved_verifiers.get(caller).unwrap_or(false) {
@@ -1247,6 +1252,7 @@ mod zk_compliance {
             Ok(())
         }
 
+        /// Append a privacy-preserving audit entry for a proof action.
         fn log_audit_event(&mut self, account: AccountId, proof_type: ZkProofType, status: ZkProofStatus, action: u8) {
             let count = self.audit_log_count.get(account).unwrap_or(0);
             let log = AuditLog {
@@ -1261,6 +1267,7 @@ mod zk_compliance {
             self.audit_log_count.insert(account, &(count + 1));
         }
 
+        /// Refresh an account's compliance summary from its latest proof state.
         fn update_compliance_data(&mut self, account: AccountId) -> Result<()> {
             let mut compliance_data = self.zk_compliance_data.get(account).unwrap_or(ZkComplianceData {
                 zk_proof_ids: Vec::new(),

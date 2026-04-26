@@ -8,6 +8,8 @@ This repository contains the core insurance smart contracts for Stellar Insured,
 
 They are intended for policyholders, DAO members, auditors, and developers who require transparent, immutable, and verifiable insurance logic deployed on the Stellar blockchain.
 
+Project structure: see [structure.md](structure.md).
+
 Architecture
 1. Policy Contract
 Manages insurance policy issuance, renewal, and lifecycle.

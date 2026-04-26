@@ -42,6 +42,7 @@ mod propchain_proxy {
     }
 
     impl TransparentProxy {
+        /// Deploy the proxy with an initial implementation code hash and caller as admin.
         #[ink(constructor)]
         pub fn new(code_hash: Hash) -> Self {
             Self {
@@ -50,6 +51,7 @@ mod propchain_proxy {
             }
         }
 
+        /// Transfer proxy administration to a new account after admin authorization.
         #[ink(message)]
         pub fn change_admin(&mut self, new_admin: AccountId) -> Result<(), Error> {
             self.ensure_admin()?;
@@ -58,16 +60,19 @@ mod propchain_proxy {
             Ok(())
         }
 
+        /// Return the code hash for the current proxy implementation.
         #[ink(message)]
         pub fn code_hash(&self) -> Hash {
             self.code_hash
         }
 
+        /// Return the account currently authorized to administer upgrades.
         #[ink(message)]
         pub fn admin(&self) -> AccountId {
             self.admin
         }
 
+        /// Swap the implementation code hash and persist the new target when the admin approves.
         fn upgrade_code_hash(&mut self, new_code_hash: Hash) -> Result<(), Error> {
             self.ensure_admin()?;
             ink::env::set_code_hash(&new_code_hash).map_err(|_| Error::UpgradeFailed)?;
@@ -76,6 +81,7 @@ mod propchain_proxy {
             Ok(())
         }
 
+        /// Ensure the caller is the configured proxy admin before privileged operations run.
         fn ensure_admin(&self) -> Result<(), Error> {
             if self.env().caller() != self.admin {
                 return Err(Error::Unauthorized);
@@ -85,12 +91,14 @@ mod propchain_proxy {
     }
 
     impl Upgradeable for TransparentProxy {
+        /// Upgrade through the shared `Upgradeable` trait interface.
         #[ink(message)]
         fn upgrade_to(&mut self, new_code_hash: Hash) -> Result<(), UpgradeError> {
             self.upgrade_code_hash(new_code_hash)
                 .map_err(|_| UpgradeError::UpgradeFailed)
         }
 
+        /// Change the proxy admin through the shared `Upgradeable` trait interface.
         #[ink(message)]
         fn change_admin(&mut self, new_admin: AccountId) -> Result<(), UpgradeError> {
             self.change_admin(new_admin)
@@ -100,6 +108,7 @@ mod propchain_proxy {
                 })
         }
 
+        /// Expose the current admin through the shared `Upgradeable` trait interface.
         #[ink(message)]
         fn admin(&self) -> AccountId {
             self.admin

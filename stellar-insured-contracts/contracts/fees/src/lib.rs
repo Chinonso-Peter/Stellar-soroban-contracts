@@ -268,6 +268,7 @@ mod propchain_fees {
     }
 
     impl FeeManager {
+        /// Initialize fee policy bounds and set the deployer as fee administrator.
         #[ink(constructor)]
         pub fn new(base_fee: u128, min_fee: u128, max_fee: u128) -> Self {
             let caller = Self::env().caller();
@@ -302,6 +303,7 @@ mod propchain_fees {
             }
         }
 
+        /// Require the caller to be the fee administrator before privileged changes.
         fn ensure_admin(&self) -> Result<(), FeeError> {
             if self.env().caller() != self.admin {
                 return Err(FeeError::Unauthorized);
@@ -537,11 +539,13 @@ mod propchain_fees {
             Ok(())
         }
 
+        /// Return a premium auction by ID when it has been created.
         #[ink(message)]
         pub fn get_auction(&self, auction_id: u64) -> Option<PremiumAuction> {
             self.auctions.get(auction_id)
         }
 
+        /// Return the total number of premium auctions created.
         #[ink(message)]
         pub fn get_auction_count(&self) -> u64 {
             self.auction_count
@@ -549,6 +553,7 @@ mod propchain_fees {
 
         // ========== Incentives and distribution ==========
 
+        /// Add a validator to the fee distribution set if it is not already present.
         #[ink(message)]
         pub fn add_validator(&mut self, account: AccountId) -> Result<(), FeeError> {
             self.ensure_admin()?;
@@ -560,6 +565,7 @@ mod propchain_fees {
             Ok(())
         }
 
+        /// Remove a validator from future fee distributions.
         #[ink(message)]
         pub fn remove_validator(&mut self, account: AccountId) -> Result<(), FeeError> {
             self.ensure_admin()?;
@@ -568,6 +574,7 @@ mod propchain_fees {
             Ok(())
         }
 
+        /// Configure how accumulated fees are split between validators and treasury.
         #[ink(message)]
         pub fn set_distribution_rates(
             &mut self,
@@ -616,6 +623,7 @@ mod propchain_fees {
             Ok(())
         }
 
+        /// Record a pending reward entry for audit and later claiming.
         fn record_reward(&mut self, account: AccountId, amount: u128, reason: RewardReason) {
             self.reward_record_count += 1;
             self.reward_records.insert(
@@ -647,6 +655,7 @@ mod propchain_fees {
             Ok(amount)
         }
 
+        /// Return the currently claimable reward balance for an account.
         #[ink(message)]
         pub fn pending_reward(&self, account: AccountId) -> u128 {
             self.pending_rewards.get(account).unwrap_or(0)
@@ -732,16 +741,19 @@ mod propchain_fees {
             rec
         }
 
+        /// Return the account that can administer fee settings.
         #[ink(message)]
         pub fn admin(&self) -> AccountId {
             self.admin
         }
 
+        /// Return the default fee configuration used when an operation has no override.
         #[ink(message)]
         pub fn default_config(&self) -> FeeConfig {
             self.default_config.clone()
         }
 
+        /// Return the undistributed fee balance held in treasury accounting.
         #[ink(message)]
         pub fn fee_treasury(&self) -> u128 {
             self.fee_treasury
@@ -749,6 +761,7 @@ mod propchain_fees {
     }
 
     impl DynamicFeeProvider for FeeManager {
+        /// Provide the dynamic recommended fee through the shared fee trait.
         #[ink(message)]
         fn get_recommended_fee(&self, operation: FeeOperation) -> u128 {
             self.calculate_fee(operation)

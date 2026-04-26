@@ -672,6 +672,7 @@ mod ai_valuation {
         }
 
         // Private helper methods
+        /// Require the caller to be the engine admin before privileged state changes.
         fn ensure_admin(&self) -> Result<(), AIValuationError> {
             if self.env().caller() != self.admin {
                 return Err(AIValuationError::Unauthorized);
@@ -679,12 +680,15 @@ mod ai_valuation {
             Ok(())
         }
 
+        /// Block state-changing operations while the valuation engine is paused.
         fn ensure_not_paused(&self) -> Result<(), AIValuationError> {
             if self.paused {
                 return Err(AIValuationError::ContractPaused);
             }
             Ok(())
         }
+
+        /// Produce deterministic placeholder property features for local valuation flows.
         fn generate_mock_features(&self, property_id: u64) -> Result<PropertyFeatures, AIValuationError> {
             // Mock feature generation based on property_id
             // In production, this would extract real features from property metadata
@@ -702,6 +706,7 @@ mod ai_valuation {
             })
         }
 
+        /// Generate a simplified model prediction from property features and model quality.
         fn generate_prediction(&self, model: &AIModel, features: &PropertyFeatures, property_id: u64) -> Result<AIPrediction, AIValuationError> {
             // Simplified prediction generation
             // In production, this would use actual ML model inference
@@ -740,6 +745,8 @@ mod ai_valuation {
                 fairness_score,
             })
         }
+
+        /// Average individual model confidence values into an ensemble confidence score.
         fn calculate_ensemble_confidence(&self, predictions: &[AIPrediction]) -> u32 {
             if predictions.is_empty() {
                 return 0;
@@ -750,6 +757,7 @@ mod ai_valuation {
             total_confidence / predictions.len() as u32
         }
 
+        /// Measure how closely model predictions agree around their mean valuation.
         fn calculate_consensus_score(&self, predictions: &[AIPrediction]) -> u32 {
             if predictions.len() < 2 {
                 return 10000; // Perfect consensus with single prediction
@@ -780,6 +788,7 @@ mod ai_valuation {
             }
         }
 
+        /// Build a short plain-language explanation for an ensemble valuation result.
         fn generate_explanation(&self, predictions: &[AIPrediction], final_value: u128) -> String {
             if predictions.is_empty() {
                 return "No predictions available".to_string();

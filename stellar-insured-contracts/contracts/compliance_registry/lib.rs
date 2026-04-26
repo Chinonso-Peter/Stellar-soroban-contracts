@@ -1220,6 +1220,7 @@ mod compliance_registry {
 
         // === Helper Functions ===
 
+        /// Require the caller to be the registry owner before administrative changes.
         fn ensure_owner(&self) -> Result<()> {
             if self.env().caller() != self.owner {
                 return Err(Error::NotAuthorized);
@@ -1227,6 +1228,7 @@ mod compliance_registry {
             Ok(())
         }
 
+        /// Require the caller to be an approved verifier before verification actions.
         fn ensure_verifier(&self) -> Result<()> {
             let caller = self.env().caller();
             if !self.verifiers.get(caller).unwrap_or(false) {
@@ -1235,6 +1237,7 @@ mod compliance_registry {
             Ok(())
         }
 
+        /// Record a compliance audit action for an account and emit the audit event.
         fn log_audit_event(&mut self, account: AccountId, action: u8) {
             let count = self.audit_log_count.get(account).unwrap_or(0);
             let log = AuditLog {
@@ -1297,6 +1300,7 @@ mod compliance_registry {
     }
 
     impl ComplianceChecker for ComplianceRegistry {
+        /// Expose the registry compliance check through the shared trait interface.
         #[ink(message)]
         fn is_compliant(&self, account: AccountId) -> bool {
             ComplianceRegistry::is_compliant(self, account)

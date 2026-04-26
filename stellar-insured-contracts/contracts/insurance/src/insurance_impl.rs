@@ -1,4 +1,5 @@
     impl PropertyInsurance {
+        /// Initialize insurance storage, default platform settings, and the admin role.
         #[ink(constructor)]
         pub fn new(admin: AccountId) -> Self {
             let mut role_manager = RoleManager::default();
@@ -2275,7 +2276,7 @@
             Ok(())
         }
 
-        /// Get pool details
+        /// Move an eligible claim into dispute during its active dispute window.
         #[ink(message)]
         pub fn move_to_dispute(&mut self, claim_id: u64) -> Result<(), InsuranceError> {
             let caller = self.env().caller();
@@ -2293,6 +2294,7 @@
             
             // Store previous status for event emission
             let previous_status = claim.status.clone();
+        /// Return a risk pool by ID when it exists.
         pub fn get_pool(&self, pool_id: u64) -> Option<RiskPool> {
             self.pools.get(&pool_id)
         }
@@ -2408,6 +2410,7 @@
             out
         }
 
+        /// Return a page of policy IDs, starting from a 1-based index.
         #[ink(message)]
         pub fn get_policies_paginated(&self, start_index: u64, limit: u64) -> Vec<u64> {
             let mut out: Vec<u64> = Vec::new();
@@ -2424,6 +2427,7 @@
             out
         }
 
+        /// Return a page of claim IDs, starting from a 1-based index.
         #[ink(message)]
         pub fn get_claims_paginated(&self, start_index: u64, limit: u64) -> Vec<u64> {
             let mut out: Vec<u64> = Vec::new();
@@ -2526,6 +2530,7 @@
         // INTERNAL HELPERS
         // =====================================================================
 
+        /// Calculate rewards earned since the provider's last reward-debt sync.
         #[inline]
         fn pending_reward_amount(stake: u128, acc_rps: u128, reward_debt: u128) -> u128 {
             let earned = stake
@@ -2534,6 +2539,7 @@
             earned.saturating_sub(reward_debt)
         }
 
+        /// Convert stake and accumulated reward-per-share into the stored reward debt.
         #[inline]
         fn synced_reward_debt(stake: u128, acc_rps: u128) -> u128 {
             stake
@@ -2574,6 +2580,7 @@
             Ok(())
         }
 
+        /// Convert a normalized score into the contract's risk-level enum.
         fn score_to_risk_level(score: u32) -> RiskLevel {
             match score {
                 0..=20 => RiskLevel::VeryHigh,
@@ -2584,6 +2591,7 @@
             }
         }
 
+        /// Convert a risk score into the premium multiplier used by underwriting.
         fn risk_score_to_multiplier(&self, score: u32) -> u32 {
             // score 0-100: higher score = lower risk = lower multiplier
             // Range: 400 (very high risk) to 80 (very low risk)
@@ -2596,6 +2604,7 @@
             }
         }
 
+        /// Return the premium multiplier associated with a coverage category.
         fn coverage_type_multiplier(coverage_type: &CoverageType) -> u32 {
             match coverage_type {
                 CoverageType::Fire => 100,
@@ -2608,6 +2617,7 @@
             }
         }
 
+        /// Mint a secondary-market insurance token tied to a policy.
         fn internal_mint_token(
             &mut self,
             policy_id: u64,
@@ -2639,6 +2649,7 @@
             Ok(token_id)
         }
 
+        /// Pay an approved claim from pool capital and update policy and claim state.
         fn execute_payout(
             &mut self,
             claim_id: u64,
@@ -2702,6 +2713,7 @@
             Ok(())
         }
 
+        /// Attempt to activate reinsurance coverage when a payout exceeds pool retention.
         fn try_reinsurance_recovery(
             &mut self,
             claim_id: u64,
