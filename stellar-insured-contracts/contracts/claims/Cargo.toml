@@ -1,0 +1,21 @@
+[package]
+name = "stellar-insured-claims"
+version = "1.0.0"
+authors = ["Stellar Insured Team"]
+edition = "2021"
+description = "Insurance claims processing contract for Stellar Insured"
+license = "MIT"
+publish = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+stellar-insured-lib = { path = "../lib" }
+
+[lib]
+name = "stellar_insured_claims"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[features]
+default = ["std"]
+std = ["soroban-sdk/testutils"]

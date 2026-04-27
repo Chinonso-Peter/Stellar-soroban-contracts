@@ -12,21 +12,20 @@ path = "lib.rs"
 [dependencies]
 # Soroban dependencies
 soroban-sdk = { version = "20.0.0" }
+serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
+tokio = { version = "1.0", features = ["full"], optional = true }
 
 # Contract dependencies
-escrow = { path = "../contracts/escrow" }
+propchain-escrow = { path = "../contracts/escrow" }
 oracle = { path = "../contracts/oracle" }
-lib = { path = "../contracts/lib" }
+stellar-insured-lib = { path = "../contracts/lib" }
 
 # Testing dependencies
 [dev-dependencies]
 soroban-sdk = { version = "20.0.0", features = ["testutils"] }
 serde_json = { version = "1.0", default-features = false }
-tokio = { version = "1.0", features = ["full"] }
-propchain-contracts = { path = "../contracts/lib" }
 property-token = { path = "../contracts/property-token", default-features = false }
 proptest = { version = "1.4", default-features = false, features = ["std"] }
-propchain-escrow = { path = "../contracts/escrow" }
 
 # Coverage tools
 [dev-dependencies.cargo-tarpaulin]

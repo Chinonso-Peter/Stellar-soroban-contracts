@@ -1,19 +1,16 @@
 [package]
-name = "propchain-contracts"
+name = "stellar-insured-lib"
 version = "1.0.0"
-authors = ["PropChain Team <dev@propchain.io>"]
+authors = ["Stellar Insured Team"]
 edition = "2021"
-description = "Decentralized real estate infrastructure smart contracts"
+description = "Shared library for Stellar Insured smart contracts"
 license = "MIT"
-homepage = "https://propchain.io"
-repository = "https://github.com/MettaChain/PropChain-contract"
-keywords = ["blockchain", "real-estate", "smart-contracts", "soroban"]
 publish = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
 
 [lib]
-name = "propchain_contracts"
+name = "stellar_insured_lib"
 path = "src/lib.rs"
 crate-type = ["rlib"]

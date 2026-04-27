@@ -1,0 +1,20 @@
+[package]
+name = "stellar-insured-risk-pool"
+version = "1.0.0"
+authors = ["Stellar Insured Team"]
+edition = "2021"
+description = "Risk pool management contract for Stellar Insured"
+license = "MIT"
+publish = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[lib]
+name = "stellar_insured_risk_pool"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[features]
+default = ["std"]
+std = ["soroban-sdk/testutils"]
