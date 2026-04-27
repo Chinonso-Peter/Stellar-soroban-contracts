@@ -1,4 +1,4 @@
-use soroban_sdk::{Env, Address, Map};
+use soroban_sdk::{Env, Address, Map, BytesN};
 
 /// Run invariant checks to detect corruption or unauthorized modifications
 pub fn verify_invariants(
@@ -8,11 +8,23 @@ pub fn verify_invariants(
     escrow_totals: i128,
     deposits_sum: i128,
 ) -> bool {
-    // Check that total supply matches sum of balances
+    // Bounded iteration to prevent unbounded looping
     let mut sum_balances: i128 = 0;
+    let mut count: u32 = 0;
+    const MAX_ITER: u32 = 100;
+
     for (_, balance) in balances.iter() {
+        if count >= MAX_ITER {
+            break;
+        }
         sum_balances += balance;
+        count += 1;
     }
+
+    // NOTE:
+    // If balances exceed MAX_ITER, this is a partial check.
+    // Full invariant enforcement should happen during state updates.
+
     if sum_balances != total_supply {
         return false;
     }
