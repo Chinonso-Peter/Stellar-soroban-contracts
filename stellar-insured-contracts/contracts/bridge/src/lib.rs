@@ -12,7 +12,7 @@ use types::{
     MultisigBridgeRequest, PropertyMetadata, RecoveryAction,
 };
 use validation::{
-    require_admin, require_not_paused, require_operator, require_supported_chain,
+    require_admin, require_non_zero_address, require_not_paused, require_operator, require_supported_chain,
     require_valid_signatures,
 };
 
@@ -33,6 +33,7 @@ impl PropertyBridge {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Already initialized");
         }
+        require_non_zero_address(&admin);
 
         let config = BridgeConfig {
             supported_chains: supported_chains.clone(),
@@ -80,6 +81,8 @@ impl PropertyBridge {
         metadata: PropertyMetadata,
     ) -> u64 {
         caller.require_auth();
+        require_non_zero_address(&caller);
+        require_non_zero_address(&recipient);
 
         // Read config once and reuse — avoids redundant storage reads (#351, #353).
         let config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
@@ -127,6 +130,7 @@ impl PropertyBridge {
 
     pub fn sign_bridge_request(env: Env, operator: Address, request_id: u64, approve: bool) {
         operator.require_auth();
+        require_non_zero_address(&operator);
         require_operator(&env, &operator);
 
         let mut request: MultisigBridgeRequest = env
@@ -160,6 +164,7 @@ impl PropertyBridge {
 
     pub fn execute_bridge(env: Env, operator: Address, request_id: u64) {
         operator.require_auth();
+        require_non_zero_address(&operator);
         require_operator(&env, &operator);
 
         let mut request: MultisigBridgeRequest = env
@@ -237,6 +242,7 @@ impl PropertyBridge {
         recovery_action: RecoveryAction,
     ) {
         admin.require_auth();
+        require_non_zero_address(&admin);
         require_admin(&env, &admin);
 
         let mut request: MultisigBridgeRequest = env
@@ -358,6 +364,7 @@ impl PropertyBridge {
 
     pub fn set_pause(env: Env, admin: Address, paused: bool) {
         admin.require_auth();
+        require_non_zero_address(&admin);
         require_admin(&env, &admin);
 
         let mut config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
@@ -423,6 +430,8 @@ impl PropertyBridge {
 
     pub fn add_operator(env: Env, admin: Address, operator: Address) {
         admin.require_auth();
+        require_non_zero_address(&admin);
+        require_non_zero_address(&operator);
         require_admin(&env, &admin);
 
         let mut operators: Vec<Address> =
@@ -435,6 +444,8 @@ impl PropertyBridge {
 
     pub fn remove_operator(env: Env, admin: Address, operator: Address) {
         admin.require_auth();
+        require_non_zero_address(&admin);
+        require_non_zero_address(&operator);
         require_admin(&env, &admin);
 
         let operators: Vec<Address> =

@@ -8,7 +8,7 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Vec};
 
 use storage::DataKey;
 use types::{ApprovalType, EscrowData, EscrowStatus, MultiSigConfig};
-use validation::{get_admin, require_not_paused, require_valid_multisig};
+use validation::{get_admin, require_not_paused, require_valid_multisig, require_non_zero_address};
 
 #[contract]
 pub struct AdvancedEscrow;
@@ -16,6 +16,7 @@ pub struct AdvancedEscrow;
 #[contractimpl]
 impl AdvancedEscrow {
     pub fn init(env: Env, admin: Address) {
+        require_non_zero_address(&admin);
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Already initialized");
         }
@@ -26,6 +27,7 @@ impl AdvancedEscrow {
 
     pub fn set_pause(env: Env, admin: Address, paused: bool) {
         admin.require_auth();
+        require_non_zero_address(&admin);
         // Use shared helper to read admin — one read, no duplication (#351, #353).
         if admin != get_admin(&env) {
             panic!("Unauthorized");
@@ -45,6 +47,11 @@ impl AdvancedEscrow {
     ) -> u64 {
         require_not_paused(&env);
         require_valid_multisig(required_signatures, participants.len());
+        require_non_zero_address(&buyer);
+        require_non_zero_address(&seller);
+        for participant in participants.iter() {
+            require_non_zero_address(participant);
+        }
 
         let mut count: u64 = env
             .storage()
@@ -168,6 +175,7 @@ impl AdvancedEscrow {
     pub fn sign_approval(env: Env, escrow_id: u64, approval_type: ApprovalType, signer: Address) {
         require_not_paused(&env);
         signer.require_auth();
+        require_non_zero_address(&signer);
 
         let config: MultiSigConfig = env
             .storage()

@@ -1,4 +1,4 @@
-use soroban_sdk::Env;
+use soroban_sdk::{Address, Env};
 
 use crate::storage::DataKey;
 
@@ -15,6 +15,12 @@ pub fn require_not_paused(env: &Env) {
         .unwrap_or(false);
     if paused {
         panic!("Contract is paused");
+    }
+}
+/// Panics if `address` is zero (all bytes zero).
+pub fn require_non_zero_address(address: &Address) {
+    if address == &Address::from([0u8; 32]) {
+        panic!("Zero address not allowed");
     }
 }
 

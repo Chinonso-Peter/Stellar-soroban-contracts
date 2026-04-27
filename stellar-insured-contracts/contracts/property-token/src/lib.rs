@@ -179,9 +179,18 @@ mod property_token {
             }
         }
 
+        /// Ensure the account is not the zero address.
+        fn ensure_non_zero_account(account: &AccountId) -> Result<(), Error> {
+            if *account == AccountId::from([0x0; 32]) {
+                return Err(Error::InvalidRequest);
+            }
+            Ok(())
+        }
+
         /// ERC-721: Returns the balance of tokens owned by an account
         #[ink(message)]
         pub fn balance_of(&self, owner: AccountId) -> u32 {
+            self.ensure_non_zero_account(&owner).unwrap_or_else(|_| panic!("Zero address not allowed"));
             self.owner_token_count.get(owner).unwrap_or(0)
         }
 
@@ -200,6 +209,8 @@ mod property_token {
             token_id: TokenId,
         ) -> Result<(), Error> {
             let caller = self.env().caller();
+            self.ensure_non_zero_account(&from)?;
+            self.ensure_non_zero_account(&to)?;
 
             // Check if caller is authorized to transfer
             let token_owner = self.token_owner.get(token_id).ok_or_else(|| {

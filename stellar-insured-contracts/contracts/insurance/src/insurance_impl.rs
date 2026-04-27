@@ -2,6 +2,9 @@
         /// Initialize insurance storage, default platform settings, and the admin role.
         #[ink(constructor)]
         pub fn new(admin: AccountId) -> Self {
+            if admin == AccountId::from([0x0; 32]) {
+                panic!("Zero address not allowed");
+            }
             let mut role_manager = RoleManager::default();
             role_manager.grant(admin, Role::Admin);
             Self {
@@ -2047,6 +2050,9 @@
         #[ink(message)]
         pub fn grant_role(&mut self, account: AccountId, role: Role) -> Result<(), InsuranceError> {
             self.ensure_role(Role::Admin)?;
+            if account == AccountId::from([0x0; 32]) {
+                panic!("Zero address not allowed");
+            }
             self.role_manager.grant(account, role);
             self.env().emit_event(RoleGranted {
                 account,
@@ -2060,6 +2066,9 @@
         #[ink(message)]
         pub fn revoke_role(&mut self, account: AccountId, role: Role) -> Result<(), InsuranceError> {
             self.ensure_role(Role::Admin)?;
+            if account == AccountId::from([0x0; 32]) {
+                panic!("Zero address not allowed");
+            }
             self.role_manager.revoke(account, role);
             self.env().emit_event(RoleRevoked {
                 account,
@@ -2072,18 +2081,27 @@
         /// Return `true` if `account` holds `role`. (#346)
         #[ink(message)]
         pub fn has_role(&self, account: AccountId, role: Role) -> bool {
+            if account == AccountId::from([0x0; 32]) {
+                panic!("Zero address not allowed");
+            }
             self.role_manager.has_role(account, role)
         }
 
         /// Return all roles held by `account`. (#346)
         #[ink(message)]
         pub fn get_roles(&self, account: AccountId) -> Vec<Role> {
+            if account == AccountId::from([0x0; 32]) {
+                panic!("Zero address not allowed");
+            }
             self.role_manager.roles_of(account)
         }
 
         /// Authorize an oracle address (backwards-compatible wrapper)
         #[ink(message)]
         pub fn authorize_oracle(&mut self, oracle: AccountId) -> Result<(), InsuranceError> {
+            if oracle == AccountId::from([0x0; 32]) {
+                panic!("Zero address not allowed");
+            }
             self.grant_role(oracle, Role::Oracle)
         }
 
@@ -2091,6 +2109,9 @@
         #[ink(message)]
         pub fn set_oracle_contract(&mut self, oracle: AccountId) -> Result<(), InsuranceError> {
             self.ensure_role(Role::Admin)?;
+            if oracle == AccountId::from([0x0; 32]) {
+                panic!("Zero address not allowed");
+            }
             self.oracle_contract = Some(oracle);
             Ok(())
         }
@@ -2098,6 +2119,9 @@
         /// Authorize a claims assessor (backwards-compatible wrapper)
         #[ink(message)]
         pub fn authorize_assessor(&mut self, assessor: AccountId) -> Result<(), InsuranceError> {
+            if assessor == AccountId::from([0x0; 32]) {
+                panic!("Zero address not allowed");
+            }
             self.grant_role(assessor, Role::Assessor)
         }
 

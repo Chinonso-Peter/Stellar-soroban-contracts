@@ -50,3 +50,10 @@ pub fn require_admin(env: &Env, caller: &Address) {
         panic!("Unauthorized");
     }
 }
+
+/// Panics if `address` is zero (all bytes zero).
+pub fn require_non_zero_address(address: &Address) {
+    if address == &Address::from([0u8; 32]) {
+        panic!("Zero address not allowed");
+    }
+}
