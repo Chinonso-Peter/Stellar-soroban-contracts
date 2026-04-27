@@ -1,3 +1,7 @@
+// All keys and value types stored by this contract use `#[contracttype]` for
+// Soroban-native XDR serialization.  Never store a type that lacks this
+// attribute — doing so causes silent decoding failures across contract
+// versions (#358).
 use soroban_sdk::{contracttype, Address};
 
 use crate::types::ApprovalType;

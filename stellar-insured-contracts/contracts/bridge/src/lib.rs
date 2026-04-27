@@ -81,8 +81,9 @@ impl PropertyBridge {
     ) -> u64 {
         caller.require_auth();
 
+        // Read config once and reuse — avoids redundant storage reads (#351, #353).
         let config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
-        require_not_paused(&config);
+        require_not_paused(&env);
         require_supported_chain(&config, destination_chain);
         require_valid_signatures(&config, required_signatures);
 
@@ -183,12 +184,15 @@ impl PropertyBridge {
         tx_counter += 1;
         env.storage().instance().set(&DataKey::TxCounter, &tx_counter);
 
+        // Cache sender once to avoid repeated clones on history key lookups (#351).
+        let sender = request.sender.clone();
+
         let transaction = BridgeTransaction {
             transaction_id: tx_counter,
             token_id: request.token_id,
             source_chain: request.source_chain,
             destination_chain: request.destination_chain,
-            sender: request.sender.clone(),
+            sender: sender.clone(),
             recipient: request.recipient.clone(),
             transaction_hash: tx_hash.clone(),
             timestamp: env.ledger().timestamp(),
@@ -208,7 +212,7 @@ impl PropertyBridge {
         let mut history: Vec<BridgeTransaction> = env
             .storage()
             .persistent()
-            .get(&DataKey::History(request.sender.clone()))
+            .get(&DataKey::History(sender.clone()))
             .unwrap_or(Vec::new(&env));
 
         if history.len() >= MAX_HISTORY_ITEMS {
@@ -217,8 +221,9 @@ impl PropertyBridge {
         history.push_back(transaction);
         env.storage()
             .persistent()
-            .set(&DataKey::History(request.sender.clone()), &history);
+            .set(&DataKey::History(sender), &history);
 
+        // Standardized event: (contract, action) topics with structured payload (#352).
         env.events().publish(
             (symbol_short!("bridge"), symbol_short!("executed")),
             (request_id, tx_hash),

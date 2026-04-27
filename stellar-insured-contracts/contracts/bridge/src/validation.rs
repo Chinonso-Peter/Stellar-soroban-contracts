@@ -4,7 +4,12 @@ use crate::storage::DataKey;
 use crate::types::BridgeConfig;
 
 /// Panics if the bridge is paused.
-pub fn require_not_paused(config: &BridgeConfig) {
+///
+/// Reads the config from storage via `&Env` — consistent with the escrow
+/// contract's `require_not_paused` signature so all validation helpers
+/// follow the same `&Env` convention (#353).
+pub fn require_not_paused(env: &Env) {
+    let config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
     if config.emergency_pause {
         panic!("Bridge paused");
     }

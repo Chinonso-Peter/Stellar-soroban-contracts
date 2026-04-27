@@ -26,6 +26,17 @@ pub mod keys {
 ///
 /// Call this before any `storage.set(key, value)` to skip writes whose value
 /// hasn't changed — storage writes are metered and should be minimised.
+///
+/// # Serialization contract (#358)
+///
+/// All types persisted via ink! `Mapping` **must** derive:
+/// - `scale::Encode` + `scale::Decode` — for SCALE binary serialization
+/// - `ink::storage::traits::StorageLayout` — for storage layout metadata
+/// - `#[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]` — for ABI generation
+///
+/// For Soroban contracts, all stored types must use `#[contracttype]`.
+/// Never mix serialization strategies within the same contract; doing so
+/// causes decoding failures across contract versions.
 pub fn needs_write<T: PartialEq>(current: &T, new_value: &T) -> bool {
     current != new_value
 }

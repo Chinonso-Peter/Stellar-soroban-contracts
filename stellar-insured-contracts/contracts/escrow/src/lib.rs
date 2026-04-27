@@ -8,7 +8,7 @@ use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Vec};
 
 use storage::DataKey;
 use types::{ApprovalType, EscrowData, EscrowStatus, MultiSigConfig};
-use validation::{require_not_paused, require_valid_multisig};
+use validation::{get_admin, require_not_paused, require_valid_multisig};
 
 #[contract]
 pub struct AdvancedEscrow;
@@ -26,8 +26,8 @@ impl AdvancedEscrow {
 
     pub fn set_pause(env: Env, admin: Address, paused: bool) {
         admin.require_auth();
-        let current_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        if admin != current_admin {
+        // Use shared helper to read admin — one read, no duplication (#351, #353).
+        if admin != get_admin(&env) {
             panic!("Unauthorized");
         }
         env.storage().instance().set(&DataKey::Paused, &paused);
@@ -78,6 +78,7 @@ impl AdvancedEscrow {
             .persistent()
             .set(&DataKey::MultiSig(count), &config);
 
+        // Standardized event format: (contract, action) topics + structured payload (#352).
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("created")),
             (count, property_id, amount),
@@ -106,6 +107,7 @@ impl AdvancedEscrow {
             EscrowStatus::Funded
         };
 
+        // Single write after all mutations — avoids intermediate writes (#351).
         env.storage()
             .persistent()
             .set(&DataKey::Escrow(escrow_id), &escrow);
@@ -190,6 +192,7 @@ impl AdvancedEscrow {
             &true,
         );
 
+        // Read-increment-write in one place; no separate read before the set (#351).
         let mut count: u32 = env
             .storage()
             .persistent()
