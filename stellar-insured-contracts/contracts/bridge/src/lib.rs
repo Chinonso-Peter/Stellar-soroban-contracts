@@ -77,6 +77,11 @@ impl PropertyBridge {
                 .persistent()
                 .set(&DataKey::ChainInfo(chain_id), &chain_info);
         }
+        
+        env.events().publish(
+            (symbol_short!("bridge"), symbol_short!("init")),
+            (admin, min_signatures, max_signatures),
+        );
     }
 
     pub fn version(env: Env) -> u32 {
@@ -174,7 +179,7 @@ impl PropertyBridge {
             panic!("Already signed");
         }
 
-        request.signatures.push_back(operator);
+        request.signatures.push_back(operator.clone());
 
         if !approve {
             request.status = BridgeOperationStatus::Failed;
@@ -185,6 +190,11 @@ impl PropertyBridge {
         env.storage()
             .persistent()
             .set(&DataKey::Request(request_id), &request);
+        
+        env.events().publish(
+            (symbol_short!("bridge"), symbol_short!("signed")),
+            (request_id, operator, approve),
+        );
     }
 
     pub fn execute_bridge(env: Env, operator: Address, request_id: u64) {
@@ -300,6 +310,98 @@ impl PropertyBridge {
         env.storage()
             .persistent()
             .set(&DataKey::Request(request_id), &request);
+        
+        env.events().publish(
+            (symbol_short!("bridge"), symbol_short!("recover")),
+            request_id,
+        );
+
+            false
+        }
+
+        /// Return the local bridge chain ID used when creating source-chain requests.
+        fn get_current_chain_id(&self) -> ChainId {
+            // This should return the current chain ID
+            // For now, we'll use a default value
+            1
+        }
+
+        /// Hash the bridge request fields into a transaction identifier.
+        fn generate_transaction_hash(&self, request: &MultisigBridgeRequest) -> Hash {
+            // Generate a cryptographic SHA-256 hash of the bridge request to
+            // ensure collision resistance and prevent trivial forgery or replay.
+            use scale::Encode;
+            use ink::env::hash::{Sha2x256, HashOutput};
+
+            let data = (
+                request.request_id,
+                request.token_id,
+                request.source_chain,
+                request.destination_chain,
+                request.sender,
+                request.recipient,
+                self.env().block_timestamp(),
+            );
+
+            let encoded_data = data.encode();
+
+            // Compute SHA-256 over the encoded bytes
+            let mut output: <Sha2x256 as HashOutput>::Type = <Sha2x256 as HashOutput>::Type::default();
+            ink::env::hash_bytes::<Sha2x256>(&encoded_data, &mut output);
+
+            // Convert the hash output to the contract `Hash` type
+            Hash::from(output)
+        }
+
+        /// Estimate bridge gas from the configured base limit and metadata size.
+        fn estimate_gas_usage(&self, request: &MultisigBridgeRequest) -> u64 {
+            let base_gas = self.config.gas_limit_per_bridge;
+            let per_byte = self
+                .chain_info
+                .get(request.destination_chain)
+                .map(|c| c.gas_multiplier as u64)
+                .unwrap_or(100);
+            let metadata_gas = request.metadata.legal_description.len() as u64 * per_byte / 100;
+            base_gas + metadata_gas
+        }
+
+        /// Verify a Merkle proof.
+        ///
+        /// Leaf = SHA-256(message_hash_bytes || leaf_index_le_bytes).
+        /// Each step: if the current index is even, node = SHA-256(current || sibling),
+        /// otherwise node = SHA-256(sibling || current). Matches standard binary Merkle trees.
+        fn verify_merkle_proof(&self, message_hash: Hash, proof: &MerkleProof) -> bool {
+            use ink::env::hash::{HashOutput, Sha2x256};
+
+            let mut current: [u8; 32] = *message_hash.as_ref();
+            // Mix in the leaf index to bind the proof to a specific position
+            let index_bytes = proof.leaf_index.to_le_bytes();
+            let mut leaf_input = [0u8; 40];
+            leaf_input[..32].copy_from_slice(&current);
+            leaf_input[32..].copy_from_slice(&index_bytes);
+            let mut leaf_hash = <Sha2x256 as HashOutput>::Type::default();
+            ink::env::hash_bytes::<Sha2x256>(&leaf_input, &mut leaf_hash);
+            current = leaf_hash;
+
+            let mut index = proof.leaf_index;
+            for sibling in &proof.proof {
+                let sibling_bytes: [u8; 32] = *sibling.as_ref();
+                let mut node_input = [0u8; 64];
+                if index % 2 == 0 {
+                    node_input[..32].copy_from_slice(&current);
+                    node_input[32..].copy_from_slice(&sibling_bytes);
+                } else {
+                    node_input[..32].copy_from_slice(&sibling_bytes);
+                    node_input[32..].copy_from_slice(&current);
+                }
+                let mut node_hash = <Sha2x256 as HashOutput>::Type::default();
+                ink::env::hash_bytes::<Sha2x256>(&node_input, &mut node_hash);
+                current = node_hash;
+                index /= 2;
+            }
+
+            Hash::from(current) == proof.root
+        }
     }
 
     pub fn set_pause(env: Env, admin: Address, paused: bool) {
@@ -310,6 +412,11 @@ impl PropertyBridge {
         let mut config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
         config.emergency_pause = paused;
         env.storage().instance().set(&DataKey::Config, &config);
+        
+        env.events().publish(
+            (symbol_short!("bridge"), symbol_short!("pause")),
+            paused,
+        );
     }
 
     pub fn add_operator(env: Env, admin: Address, operator: Address) {
@@ -326,8 +433,13 @@ impl PropertyBridge {
         }
 
         if !operators.contains(operator.clone()) {
-            operators.push_back(operator);
+            operators.push_back(operator.clone());
             env.storage().instance().set(&DataKey::Operators, &operators);
+            
+            env.events().publish(
+                (symbol_short!("bridge"), symbol_short!("opadd")),
+                operator,
+            );
         }
     }
 
@@ -346,5 +458,10 @@ impl PropertyBridge {
             }
         }
         env.storage().instance().set(&DataKey::Operators, &new_operators);
+        
+        env.events().publish(
+            (symbol_short!("bridge"), symbol_short!("oprm")),
+            operator,
+        );
     }
 }

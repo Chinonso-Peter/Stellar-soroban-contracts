@@ -82,6 +82,11 @@ impl SlashingContract {
         env.storage().instance().set(&DataKey::RiskPool, &risk_pool);
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::SlashableRoles, &Vec::<Symbol>::new(&env));
+        
+        env.events().publish(
+            (symbol_short!("slash"), symbol_short!("init")),
+            (admin, governance, risk_pool),
+        );
     }
 
     pub fn configure_penalty_parameters(env: Env, role: Symbol, params: PenaltyParams) {
@@ -89,6 +94,10 @@ impl SlashingContract {
         admin.require_auth();
 
         env.storage().persistent().set(&DataKey::PenaltyParams(role.clone()), &params);
+        
+        env.events().publish(
+            (symbol_short!("slash"), symbol_short!("config")),
+            (role, params.percentage, params.multiplier),
 
         // #379: emit event for admin action
         env.events().publish(
@@ -148,6 +157,11 @@ impl SlashingContract {
         if !roles.contains(role.clone()) {
             roles.push_back(role.clone());
             env.storage().instance().set(&DataKey::SlashableRoles, &roles);
+            
+            env.events().publish(
+                (symbol_short!("slash"), symbol_short!("roleadd")),
+                role,
+            );
         }
 
         // #379: emit event for admin action
@@ -169,6 +183,9 @@ impl SlashingContract {
             }
         }
         env.storage().instance().set(&DataKey::SlashableRoles, &new_roles);
+        
+        env.events().publish(
+            (symbol_short!("slash"), symbol_short!("rolerm")),
 
         // #379: emit event for admin action
         env.events().publish(
@@ -207,6 +224,9 @@ impl SlashingContract {
         let admin = get_admin(&env);
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &true);
+        
+        env.events().publish(
+            (symbol_short!("slash"), symbol_short!("pause")),
 
         // #379: emit event for admin action
         env.events().publish(
@@ -219,6 +239,9 @@ impl SlashingContract {
         let admin = get_admin(&env);
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &false);
+        
+        env.events().publish(
+            (symbol_short!("slash"), symbol_short!("unpause")),
 
         // #379: emit event for admin action
         env.events().publish(

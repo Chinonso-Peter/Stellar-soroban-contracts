@@ -27,6 +27,11 @@ impl AdvancedEscrow {
         env.storage().instance().set(&DataKey::Version, &CONTRACT_VERSION);
         env.storage().instance().set(&DataKey::EscrowCount, &0u64);
         env.storage().instance().set(&DataKey::Paused, &false);
+        
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("init")),
+            admin,
+        );
     }
 
     pub fn version(env: Env) -> u32 {
@@ -44,6 +49,11 @@ impl AdvancedEscrow {
             panic!("Unauthorized");
         }
         env.storage().instance().set(&DataKey::Paused, &paused);
+        
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("pause")),
+            paused,
+        );
     }
 
     pub fn create_escrow_advanced(
@@ -219,7 +229,7 @@ impl AdvancedEscrow {
         }
 
         env.storage().persistent().set(
-            &DataKey::Signature(escrow_id, approval_type, signer),
+            &DataKey::Signature(escrow_id, approval_type, signer.clone()),
             &true,
         );
 
@@ -233,5 +243,10 @@ impl AdvancedEscrow {
         env.storage()
             .persistent()
             .set(&DataKey::SigCount(escrow_id, approval_type), &count);
+        
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("signed")),
+            (escrow_id, signer, count),
+        );
     }
 }

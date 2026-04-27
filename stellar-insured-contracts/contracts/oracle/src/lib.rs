@@ -164,6 +164,40 @@ mod propchain_oracle {
         trend_value: i32,
     }
 
+    #[ink(event)]
+    pub struct ValuationRequested {
+        #[ink(topic)]
+        property_id: u64,
+        request_id: u64,
+        timestamp: u64,
+    }
+
+    #[ink(event)]
+    pub struct RiskPoolSet {
+        #[ink(topic)]
+        risk_pool: AccountId,
+    }
+
+    #[ink(event)]
+    pub struct AIValuationContractSet {
+        #[ink(topic)]
+        ai_contract: AccountId,
+    }
+
+    #[ink(event)]
+    pub struct BatchValuationRequested {
+        count: u32,
+        timestamp: u64,
+    }
+
+    #[ink(event)]
+    pub struct ValuationFromSourcesUpdated {
+        #[ink(topic)]
+        property_id: u64,
+        sources_count: u32,
+        aggregated_price: u128,
+    }
+
     impl PropertyValuationOracle {
         /// Constructor for the Property Valuation Oracle
         #[ink(constructor)]
@@ -199,6 +233,11 @@ mod propchain_oracle {
         pub fn set_risk_pool(&mut self, risk_pool: AccountId) -> Result<(), OracleError> {
             self.ensure_admin()?;
             self.risk_pool = Some(risk_pool);
+            
+            self.env().emit_event(RiskPoolSet {
+                risk_pool,
+            });
+            
             Ok(())
         }
 
@@ -331,6 +370,13 @@ mod propchain_oracle {
 
             self.update_property_valuation(property_id, valuation)?;
             self.clear_pending_request(property_id);
+            
+            self.env().emit_event(ValuationFromSourcesUpdated {
+                property_id,
+                sources_count: prices.len() as u32,
+                aggregated_price,
+            });
+            
             Ok(())
         }
 
@@ -350,6 +396,12 @@ mod propchain_oracle {
 
             self.pending_requests
                 .insert(&property_id, &self.env().block_timestamp());
+            
+            self.env().emit_event(ValuationRequested {
+                property_id,
+                request_id,
+                timestamp: self.env().block_timestamp(),
+            });
 
             Ok(request_id)
         }
@@ -367,6 +419,12 @@ mod propchain_oracle {
                     request_ids.push(req_id);
                 }
             }
+            
+            self.env().emit_event(BatchValuationRequested {
+                count: request_ids.len() as u32,
+                timestamp: self.env().block_timestamp(),
+            });
+            
             Ok(request_ids)
         }
 
@@ -542,6 +600,11 @@ mod propchain_oracle {
         ) -> Result<(), OracleError> {
             self.ensure_admin()?;
             self.ai_valuation_contract = Some(ai_contract);
+            
+            self.env().emit_event(AIValuationContractSet {
+                ai_contract,
+            });
+            
             Ok(())
         }
 

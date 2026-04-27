@@ -245,6 +245,27 @@ mod propchain_fees {
         timestamp: u64,
     }
 
+    #[ink(event)]
+    pub struct ValidatorAdded {
+        #[ink(topic)]
+        account: AccountId,
+        timestamp: u64,
+    }
+
+    #[ink(event)]
+    pub struct ValidatorRemoved {
+        #[ink(topic)]
+        account: AccountId,
+        timestamp: u64,
+    }
+
+    #[ink(event)]
+    pub struct DistributionRatesSet {
+        validator_share_bp: u32,
+        treasury_share_bp: u32,
+        timestamp: u64,
+    }
+
     /// Dynamic fee calculation: base * (1 + congestion_factor + demand_factor)
     fn compute_dynamic_fee(
         config: &FeeConfig,
@@ -562,6 +583,12 @@ mod propchain_fees {
             }
             self.validators.insert(account, &true);
             self.validator_list.push(account);
+            
+            self.env().emit_event(ValidatorAdded {
+                account,
+                timestamp: self.env().block_timestamp(),
+            });
+            
             Ok(())
         }
 
@@ -571,6 +598,12 @@ mod propchain_fees {
             self.ensure_admin()?;
             self.validators.remove(account);
             self.validator_list.retain(|&a| a != account);
+            
+            self.env().emit_event(ValidatorRemoved {
+                account,
+                timestamp: self.env().block_timestamp(),
+            });
+            
             Ok(())
         }
 
@@ -587,6 +620,13 @@ mod propchain_fees {
             }
             self.validator_share_bp = validator_share_bp;
             self.treasury_share_bp = treasury_share_bp;
+            
+            self.env().emit_event(DistributionRatesSet {
+                validator_share_bp,
+                treasury_share_bp,
+                timestamp: self.env().block_timestamp(),
+            });
+            
             Ok(())
         }
 
