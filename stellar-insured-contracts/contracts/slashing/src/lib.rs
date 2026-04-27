@@ -50,14 +50,16 @@ impl SlashingContract {
     }
 
     pub fn configure_penalty_parameters(env: Env, role: Symbol, params: PenaltyParams) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
 
         env.storage().persistent().set(&DataKey::PenaltyParams(role), &params);
     }
 
     pub fn slash_funds(env: Env, target: Address, role: Symbol, reason: String, amount: i128) {
-        let governance: Address = env.storage().instance().get(&DataKey::Governance).unwrap();
+        let governance: Address = env.storage().instance().get(&DataKey::Governance)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         governance.require_auth();
 
         if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
@@ -95,7 +97,8 @@ impl SlashingContract {
     }
 
     pub fn add_slashable_role(env: Env, role: Symbol) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
 
         let mut roles: Vec<Symbol> = env.storage().instance().get(&DataKey::SlashableRoles).unwrap_or(Vec::new(&env));
@@ -106,7 +109,8 @@ impl SlashingContract {
     }
 
     pub fn remove_slashable_role(env: Env, role: Symbol) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
 
         let roles: Vec<Symbol> = env.storage().instance().get(&DataKey::SlashableRoles).unwrap_or(Vec::new(&env));
@@ -147,13 +151,15 @@ impl SlashingContract {
     }
 
     pub fn pause(env: Env) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &true);
     }
 
     pub fn unpause(env: Env) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &false);
     }

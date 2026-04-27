@@ -43,12 +43,14 @@ impl RiskPoolContract {
     pub fn deposit_liquidity(env: Env, provider: Address, amount: i128) {
         provider.require_auth();
         
-        let min_stake: i128 = env.storage().instance().get(&DataKey::MinStake).unwrap();
+        let min_stake: i128 = env.storage().instance().get(&DataKey::MinStake)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         if amount < min_stake {
             panic!("Amount below minimum stake");
         }
 
-        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token: Address = env.storage().instance().get(&DataKey::Token)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         
         // Transfer tokens from provider to this contract
         // Note: In a real implementation, we'd use the token interface
@@ -60,8 +62,10 @@ impl RiskPoolContract {
         current_stake += amount;
         env.storage().persistent().set(&DataKey::ProviderStake(provider), &current_stake);
 
-        let mut total_cap: i128 = env.storage().instance().get(&DataKey::TotalCapital).unwrap();
-        let mut avail_cap: i128 = env.storage().instance().get(&DataKey::AvailableCapital).unwrap();
+        let mut total_cap: i128 = env.storage().instance().get(&DataKey::TotalCapital)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
+        let mut avail_cap: i128 = env.storage().instance().get(&DataKey::AvailableCapital)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         
         total_cap += amount;
         avail_cap += amount;
@@ -80,19 +84,22 @@ impl RiskPoolContract {
             panic!("Insufficient stake");
         }
 
-        let mut avail_cap: i128 = env.storage().instance().get(&DataKey::AvailableCapital).unwrap();
+        let mut avail_cap: i128 = env.storage().instance().get(&DataKey::AvailableCapital)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         if avail_cap < amount {
             panic!("Insufficient available capital in pool");
         }
 
-        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token: Address = env.storage().instance().get(&DataKey::Token)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         let client = soroban_sdk::token::Client::new(&env, &token);
         client.transfer(&env.current_contract_address(), &provider, &amount);
 
         current_stake -= amount;
         env.storage().persistent().set(&DataKey::ProviderStake(provider), &current_stake);
 
-        let mut total_cap: i128 = env.storage().instance().get(&DataKey::TotalCapital).unwrap();
+        let mut total_cap: i128 = env.storage().instance().get(&DataKey::TotalCapital)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         total_cap -= amount;
         avail_cap -= amount;
 
@@ -103,22 +110,26 @@ impl RiskPoolContract {
     }
 
     pub fn payout_claim(env: Env, recipient: Address, amount: i128) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
 
-        let mut avail_cap: i128 = env.storage().instance().get(&DataKey::AvailableCapital).unwrap();
+        let mut avail_cap: i128 = env.storage().instance().get(&DataKey::AvailableCapital)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         if avail_cap < amount {
             panic!("Insufficient pool funds for payout");
         }
 
-        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token: Address = env.storage().instance().get(&DataKey::Token)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         let client = soroban_sdk::token::Client::new(&env, &token);
         client.transfer(&env.current_contract_address(), &recipient, &amount);
 
         avail_cap -= amount;
         env.storage().instance().set(&DataKey::AvailableCapital, &avail_cap);
 
-        let mut paid: i128 = env.storage().instance().get(&DataKey::ClaimsPaid).unwrap();
+        let mut paid: i128 = env.storage().instance().get(&DataKey::ClaimsPaid)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         paid += amount;
         env.storage().instance().set(&DataKey::ClaimsPaid, &paid);
 

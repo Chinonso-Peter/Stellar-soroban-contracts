@@ -109,7 +109,8 @@ impl PropertyBridge {
         env.storage().persistent().set(&DataKey::Nonce(caller.clone()), &nonce);
 
         // Read config once and reuse — avoids redundant storage reads (#351, #353).
-        let config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
+        let config: BridgeConfig = env.storage().instance().get(&DataKey::Config)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         require_not_paused(&env);
         require_supported_chain(&config, destination_chain);
         require_valid_signatures(&config, required_signatures);
@@ -307,7 +308,8 @@ impl PropertyBridge {
         require_non_zero_address(&admin);
         require_admin(&env, &admin);
 
-        let mut config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
+        let mut config: BridgeConfig = env.storage().instance().get(&DataKey::Config)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         config.emergency_pause = paused;
         env.storage().instance().set(&DataKey::Config, &config);
     }
@@ -319,7 +321,8 @@ impl PropertyBridge {
         require_admin(&env, &admin);
 
         let mut operators: Vec<Address> =
-            env.storage().instance().get(&DataKey::Operators).unwrap();
+            env.storage().instance().get(&DataKey::Operators)
+                .unwrap_or_else(|| panic!("Contract not initialized"));
         
         if operators.len() >= MAX_OPERATORS {
             panic!("Too many operators");
@@ -338,7 +341,8 @@ impl PropertyBridge {
         require_admin(&env, &admin);
 
         let operators: Vec<Address> =
-            env.storage().instance().get(&DataKey::Operators).unwrap();
+            env.storage().instance().get(&DataKey::Operators)
+                .unwrap_or_else(|| panic!("Contract not initialized"));
         let mut new_operators = Vec::new(&env);
         for op in operators.iter() {
             if op != operator {

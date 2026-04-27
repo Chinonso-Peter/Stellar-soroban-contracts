@@ -9,7 +9,8 @@ use crate::types::BridgeConfig;
 /// contract's `require_not_paused` signature so all validation helpers
 /// follow the same `&Env` convention (#353).
 pub fn require_not_paused(env: &Env) {
-    let config: BridgeConfig = env.storage().instance().get(&DataKey::Config).unwrap();
+    let config: BridgeConfig = env.storage().instance().get(&DataKey::Config)
+        .unwrap_or_else(|| panic!("Contract not initialized"));
     if config.emergency_pause {
         panic!("Bridge paused");
     }
@@ -37,7 +38,7 @@ pub fn require_operator(env: &Env, caller: &Address) {
         .storage()
         .instance()
         .get(&DataKey::Operators)
-        .unwrap();
+        .unwrap_or_else(|| panic!("Contract not initialized"));
     if !operators.contains(caller.clone()) {
         panic!("Not an operator");
     }
@@ -45,7 +46,8 @@ pub fn require_operator(env: &Env, caller: &Address) {
 
 /// Panics if `caller` is not the stored admin.
 pub fn require_admin(env: &Env, caller: &Address) {
-    let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+    let admin: Address = env.storage().instance().get(&DataKey::Admin)
+        .unwrap_or_else(|| panic!("Contract not initialized"));
     if *caller != admin {
         panic!("Unauthorized");
     }

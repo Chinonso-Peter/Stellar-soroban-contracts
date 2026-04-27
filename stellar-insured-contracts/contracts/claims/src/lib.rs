@@ -59,7 +59,8 @@ impl ClaimsContract {
     }
 
     pub fn start_review(env: Env, claim_id: u64) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
 
         let mut claim: InsuranceClaim = env.storage().persistent().get(&DataKey::Claim(claim_id)).expect("Claim not found");
@@ -77,7 +78,8 @@ impl ClaimsContract {
     }
 
     pub fn approve_claim(env: Env, claim_id: u64) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
 
         let mut claim: InsuranceClaim = env.storage().persistent().get(&DataKey::Claim(claim_id)).expect("Claim not found");
@@ -95,7 +97,8 @@ impl ClaimsContract {
     }
 
     pub fn reject_claim(env: Env, claim_id: u64) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
 
         let mut claim: InsuranceClaim = env.storage().persistent().get(&DataKey::Claim(claim_id)).expect("Claim not found");
@@ -113,7 +116,8 @@ impl ClaimsContract {
     }
 
     pub fn settle_claim(env: Env, claim_id: u64) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         admin.require_auth();
 
         let mut claim: InsuranceClaim = env.storage().persistent().get(&DataKey::Claim(claim_id)).expect("Claim not found");
@@ -122,7 +126,8 @@ impl ClaimsContract {
         }
 
         // Cross-contract call to Risk Pool to payout
-        let risk_pool: Address = env.storage().instance().get(&DataKey::RiskPool).unwrap();
+        let risk_pool: Address = env.storage().instance().get(&DataKey::RiskPool)
+            .unwrap_or_else(|| panic!("Contract not initialized"));
         
         // payout_claim(recipient, amount)
         env.invoke_contract::<()>(
