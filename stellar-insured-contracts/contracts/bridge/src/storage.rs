@@ -8,6 +8,7 @@ use soroban_sdk::{contracttype, Address, BytesN};
 pub enum DataKey {
     Config,
     Admin,
+    Version,
     Request(u64),
     History(Address),
     ChainInfo(u32),

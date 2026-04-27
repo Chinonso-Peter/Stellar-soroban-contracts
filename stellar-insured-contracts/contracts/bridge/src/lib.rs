@@ -16,6 +16,8 @@ use validation::{
     require_valid_signatures,
 };
 
+const CONTRACT_VERSION: u32 = 1;
+
 #[contract]
 pub struct PropertyBridge;
 
@@ -46,6 +48,7 @@ impl PropertyBridge {
 
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Version, &CONTRACT_VERSION);
         env.storage().instance().set(&DataKey::ReqCounter, &0u64);
         env.storage().instance().set(&DataKey::TxCounter, &0u64);
 
@@ -67,6 +70,13 @@ impl PropertyBridge {
                 .persistent()
                 .set(&DataKey::ChainInfo(chain_id), &chain_info);
         }
+    }
+
+    pub fn version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or(CONTRACT_VERSION)
     }
 
     pub fn initiate_bridge_multisig(

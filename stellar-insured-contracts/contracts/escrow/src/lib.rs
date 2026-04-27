@@ -10,6 +10,8 @@ use storage::DataKey;
 use types::{ApprovalType, EscrowData, EscrowStatus, MultiSigConfig};
 use validation::{get_admin, require_not_paused, require_valid_multisig};
 
+const CONTRACT_VERSION: u32 = 1;
+
 #[contract]
 pub struct AdvancedEscrow;
 
@@ -20,8 +22,16 @@ impl AdvancedEscrow {
             panic!("Already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Version, &CONTRACT_VERSION);
         env.storage().instance().set(&DataKey::EscrowCount, &0u64);
         env.storage().instance().set(&DataKey::Paused, &false);
+    }
+
+    pub fn version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or(CONTRACT_VERSION)
     }
 
     pub fn set_pause(env: Env, admin: Address, paused: bool) {

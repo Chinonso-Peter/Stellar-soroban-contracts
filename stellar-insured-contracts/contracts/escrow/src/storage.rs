@@ -11,6 +11,7 @@ pub enum DataKey {
     Escrow(u64),
     EscrowCount,
     Admin,
+    Version,
     Paused,
     MultiSig(u64),
     Signature(u64, ApprovalType, Address),
